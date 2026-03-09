@@ -44,12 +44,13 @@
     position:fixed;inset:0;background:rgba(27,27,24,.45);
     display:flex;align-items:flex-end;justify-content:center;
     z-index:200;animation:fadeIn .2s ease;
+    overflow-y:auto;-webkit-overflow-scrolling:touch;
   }
   .modal-sheet{
     background:#F7F5F0;border-radius:24px 24px 0 0;
     width:100%;max-width:480px;
-    padding:0 0 env(safe-area-inset-bottom);
-    max-height:80vh;overflow-y:auto;
+    padding:0 0 calc(env(safe-area-inset-bottom) + 16px);
+    flex-shrink:0;overflow-y:visible;
     animation:slideUp .25s cubic-bezier(.34,1.56,.64,1);
   }
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
@@ -94,7 +95,7 @@ const {BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Res
 
 // ─── Storage ───
 const SK = "habitTracker_v1";
-const load = () => { try { return JSON.parse(localStorage.getItem(SK)) || {habits:[],logs:{}}; } catch(e) { return {habits:[],logs:{}}; } };
+const load = () => { try { const d=JSON.parse(localStorage.getItem(SK))||{habits:[],logs:{},todos:[]}; return {...d,todos:d.todos||[]}; } catch(e) { return {habits:[],logs:{},todos:[]}; } };
 const persist = (d) => localStorage.setItem(SK, JSON.stringify(d));
 
 // ─── Dates ───
@@ -139,6 +140,11 @@ const Ico = ({t,sz=20,c=C.ts}) => {
     download:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
     upload:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
     shield:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+    check:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+    flag:<svg style={s} viewBox="0 0 24 24" fill={c==="#E76F51"?c:"none"} stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>,
+    repeat:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>,
+    todoList:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><polyline points="3 6 4 7 6 5"/><polyline points="3 12 4 13 6 11"/><polyline points="3 18 4 19 6 17"/></svg>,
+    close:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
   };
   return m[t]||null;
 };
@@ -903,6 +909,253 @@ function App() {
     </>;
   };
 
+  // ─── Todo Tab ───
+  const TodoTab = () => {
+    const [showForm, setShowForm] = useState(false);
+    const [editTodo, setEditTodo] = useState(null);
+    const [filter, setFilter] = useState("active"); // active | done | all
+    const ts = today();
+
+    // todo shape: {id, text, done, flagged, dueDate, recur, completedOn}
+    // recur: null | "daily" | "weekly" | "monthly"
+
+    const addTodo = (t) => setData(p=>({...p, todos:[...p.todos, {...t, id:Date.now().toString()}]}));
+    const updTodo = (id, u) => setData(p=>({...p, todos:p.todos.map(t=>t.id===id?{...t,...u}:t)}));
+    const delTodo = (id) => setData(p=>({...p, todos:p.todos.filter(t=>t.id!==id)}));
+
+    const toggleDone = (todo) => {
+      if(todo.recur && !todo.done) {
+        // Recurring: mark done for today, will reappear next cycle
+        updTodo(todo.id, {done:true, completedOn:ts});
+      } else {
+        updTodo(todo.id, {done:!todo.done, completedOn:!todo.done?ts:null});
+      }
+    };
+
+    // For recurring todos, figure out if they should appear as active today
+    const isActiveToday = (todo) => {
+      if(!todo.recur) return !todo.done;
+      if(!todo.done) return true;
+      const completed = todo.completedOn;
+      if(!completed) return true;
+      if(todo.recur==="daily") return completed < ts;
+      if(todo.recur==="weekly") return weekStart(completed) < weekStart(ts);
+      if(todo.recur==="monthly") {
+        const c=new Date(completed+"T00:00:00"), n=new Date(ts+"T00:00:00");
+        return c.getFullYear()!==n.getFullYear() || c.getMonth()!==n.getMonth();
+      }
+      return false;
+    };
+
+    const isOverdue = (todo) => todo.dueDate && todo.dueDate < ts && !todo.done && isActiveToday(todo);
+    const isDueToday = (todo) => todo.dueDate === ts;
+    const isDueSoon = (todo) => {
+      if(!todo.dueDate || todo.done) return false;
+      const diff = (new Date(todo.dueDate+"T00:00:00") - new Date(ts+"T00:00:00")) / 86400000;
+      return diff > 0 && diff <= 2;
+    };
+
+    const fmtDue = (ds) => {
+      const d = new Date(ds+"T00:00:00"), n = new Date(ts+"T00:00:00");
+      const diff = Math.round((d-n)/86400000);
+      if(diff===0) return "Today";
+      if(diff===1) return "Tomorrow";
+      if(diff===-1) return "Yesterday";
+      if(diff<0) return `${Math.abs(diff)}d overdue`;
+      if(diff<=6) return `${diff}d`;
+      return d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
+    };
+
+    const visibleTodos = (data.todos||[]).filter(t => {
+      if(filter==="active") return isActiveToday(t) || (!t.recur && !t.done);
+      if(filter==="done") return t.done && !isActiveToday(t);
+      return true;
+    }).sort((a,b) => {
+      // Sort: flagged first, then by due date, then by creation
+      if(a.flagged&&!b.flagged) return -1;
+      if(!a.flagged&&b.flagged) return 1;
+      if(a.dueDate&&!b.dueDate) return -1;
+      if(!a.dueDate&&b.dueDate) return 1;
+      if(a.dueDate&&b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+      return a.id.localeCompare(b.id);
+    });
+
+    const flaggedCount = (data.todos||[]).filter(t=>t.flagged&&isActiveToday(t)).length;
+    const activeCount = (data.todos||[]).filter(t=>isActiveToday(t)||(!t.recur&&!t.done)).length;
+    const doneCount = (data.todos||[]).filter(t=>t.done&&!isActiveToday(t)).length;
+
+    // ── Todo Form (add/edit sheet) ──
+    const TodoForm = ({existing:ex, onClose}) => {
+      const [text, setText] = useState(ex?.text||"");
+      const [flagged, setFlagged] = useState(ex?.flagged||false);
+      const [dueDate, setDueDate] = useState(ex?.dueDate||"");
+      const [recur, setRecur] = useState(ex?.recur||null);
+
+      const save = () => {
+        if(!text.trim()) return;
+        const t = {text:text.trim(), flagged, dueDate:dueDate||null, recur, done:ex?.done||false, completedOn:ex?.completedOn||null};
+        if(ex) updTodo(ex.id, t); else addTodo(t);
+        onClose();
+      };
+
+      const recurOpts = [{l:"None",v:null},{l:"Daily",v:"daily"},{l:"Weekly",v:"weekly"},{l:"Monthly",v:"monthly"}];
+
+      return (
+        <div style={{position:"fixed",inset:0,background:"rgba(27,27,24,.45)",zIndex:200,animation:"fadeIn .2s ease",overflowY:"auto",WebkitOverflowScrolling:"touch",display:"flex",flexDirection:"column",justifyContent:"flex-end",alignItems:"center"}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+          <div style={{background:"#F7F5F0",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:480,flexShrink:0,paddingBottom:"calc(env(safe-area-inset-bottom) + 8px)",animation:"slideUp .25s cubic-bezier(.34,1.56,.64,1)"}}>
+            <div style={{display:"flex",justifyContent:"center",padding:"12px 0 0"}}>
+              <div style={{width:36,height:4,borderRadius:99,background:C.cb}}/>
+            </div>
+            <div style={{padding:"16px 20px 20px"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
+                <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22}}>{ex?"Edit To-do":"New To-do"}</div>
+                <button style={{background:"none",border:"none",cursor:"pointer",padding:4}} onClick={onClose}><Ico t="close" sz={20} c={C.tm}/></button>
+              </div>
+
+              {/* Text input */}
+              <textarea
+                style={{width:"100%",padding:"12px 14px",borderRadius:12,border:`1.5px solid ${C.cb}`,fontFamily:"'DM Sans',sans-serif",fontSize:15,color:C.txt,background:C.bg,outline:"none",resize:"none",minHeight:72,lineHeight:1.5}}
+                placeholder="What needs to be done?"
+                value={text}
+                onChange={e=>setText(e.target.value)}
+              />
+
+              {/* Flag toggle */}
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:16,padding:"12px 14px",background:C.card,borderRadius:12,border:`1.5px solid ${flagged?"#E76F51":C.cb}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <Ico t="flag" sz={18} c={flagged?C.acc:C.tm}/>
+                  <span style={{fontSize:14,fontWeight:600,color:flagged?C.acc:C.txt}}>Priority / Flagged</span>
+                </div>
+                <button onClick={()=>setFlagged(f=>!f)} style={{width:44,height:26,borderRadius:99,background:flagged?C.acc:C.pb,border:"none",cursor:"pointer",position:"relative",transition:"background .2s"}}>
+                  <div style={{position:"absolute",top:3,left:flagged?21:3,width:20,height:20,borderRadius:99,background:"#fff",boxShadow:"0 1px 3px rgba(0,0,0,.2)",transition:"left .2s"}}/>
+                </button>
+              </div>
+
+              {/* Due date */}
+              <div style={{marginTop:12}}>
+                <label style={{fontSize:12,fontWeight:700,color:C.ts,textTransform:"uppercase",letterSpacing:"0.06em",display:"block",marginBottom:6}}>Due Date</label>
+                <input type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}
+                  style={{width:"100%",padding:"11px 14px",borderRadius:12,border:`1.5px solid ${C.cb}`,fontFamily:"'DM Sans',sans-serif",fontSize:15,color:dueDate?C.txt:C.tm,background:C.bg,outline:"none"}}
+                />
+                {dueDate&&<button onClick={()=>setDueDate("")} style={{background:"none",border:"none",cursor:"pointer",fontSize:12,color:C.tm,marginTop:4,padding:0}}>Clear date</button>}
+              </div>
+
+              {/* Recurrence */}
+              <div style={{marginTop:14}}>
+                <label style={{fontSize:12,fontWeight:700,color:C.ts,textTransform:"uppercase",letterSpacing:"0.06em",display:"block",marginBottom:8}}>Repeat</label>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {recurOpts.map(o=>(
+                    <button key={String(o.v)} onClick={()=>setRecur(o.v)}
+                      style={{padding:"7px 14px",borderRadius:99,border:`1.5px solid ${recur===o.v?C.pri:C.cb}`,background:recur===o.v?C.pg:"transparent",color:recur===o.v?C.pri:C.ts,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      {o.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Save */}
+              <button onClick={save} className="press-btn"
+                style={{marginTop:20,width:"100%",padding:"14px",borderRadius:12,background:C.pri,color:"#fff",border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:700,fontSize:15}}>
+                {ex?"Save Changes":"Add To-do"}
+              </button>
+              {ex&&<button onClick={()=>{delTodo(ex.id);onClose();}} className="press-btn"
+                style={{marginTop:10,width:"100%",padding:"12px",borderRadius:12,background:"none",color:C.acc,border:`1.5px solid ${C.cb}`,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                <Ico t="trash" sz={15} c={C.acc}/> Delete
+              </button>}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    return <>
+      {/* Header */}
+      <div style={{padding:"24px 20px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div>
+          <div style={{fontSize:13,color:C.tm,fontWeight:500,letterSpacing:"0.04em",textTransform:"uppercase"}}>{new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+          <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-0.02em"}}>To-do</div>
+        </div>
+        <button className="press-btn" style={{width:44,height:44,borderRadius:14,background:C.pri,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:C.shL}} onClick={()=>{setEditTodo(null);setShowForm(true);}}>
+          <Ico t="plus" sz={20} c="#fff"/>
+        </button>
+      </div>
+
+      {/* Filter pills */}
+      <div style={{display:"flex",gap:8,padding:"0 20px 16px"}}>
+        {[{l:`Active${activeCount>0?` (${activeCount})`:""}`,v:"active"},{l:`Done${doneCount>0?` (${doneCount})`:""}`,v:"done"},{l:"All",v:"all"}].map(f=>(
+          <button key={f.v} onClick={()=>setFilter(f.v)}
+            style={{padding:"7px 14px",borderRadius:99,border:`1.5px solid ${filter===f.v?C.pri:C.cb}`,background:filter===f.v?C.pg:"transparent",color:filter===f.v?C.pri:C.ts,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            {f.l}
+          </button>
+        ))}
+      </div>
+
+      {/* Todo list */}
+      <div style={{padding:"0 16px"}}>
+        {visibleTodos.length===0&&(
+          <div style={{textAlign:"center",padding:"50px 20px",color:C.tm}}>
+            <div style={{fontSize:40,marginBottom:12}}>{filter==="done"?"✅":"📋"}</div>
+            <div style={{fontSize:16,fontWeight:600,color:C.txt,marginBottom:6}}>
+              {filter==="done"?"Nothing completed yet":filter==="active"?"All clear!":"No to-dos yet"}
+            </div>
+            <div style={{fontSize:13,lineHeight:1.5}}>
+              {filter==="active"?"Tap + to add your first to-do":""}
+            </div>
+          </div>
+        )}
+
+        {visibleTodos.map((todo,i)=>{
+          const overdue = isOverdue(todo);
+          const dueToday = isDueToday(todo);
+          const dueSoon = isDueSoon(todo);
+          const active = isActiveToday(todo) || (!todo.recur&&!todo.done);
+
+          return (
+            <div key={todo.id} className="card-enter" style={{animationDelay:`${i*0.04}s`,
+              background:C.card,borderRadius:14,padding:"14px 14px 14px 8px",
+              marginBottom:8,boxShadow:C.sh,
+              border:`1px solid ${overdue?C.acc+"55":todo.flagged&&active?"#E9C46A55":C.cb}`,
+              borderLeft:`4px solid ${overdue?C.acc:todo.flagged&&active?"#E9C46A":todo.done?C.pb:C.pri}`,
+              display:"flex",alignItems:"flex-start",gap:10,opacity:todo.done&&!active?0.55:1}}>
+
+              {/* Checkbox */}
+              <button className="press-btn" onClick={()=>toggleDone(todo)} style={{flexShrink:0,marginTop:1,width:24,height:24,borderRadius:7,border:`2px solid ${todo.done&&!active?C.ok:todo.flagged?C.acc:C.pri}`,background:todo.done&&!active?C.ok:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+                {(todo.done&&!active)&&<Ico t="check" sz={13} c="#fff"/>}
+              </button>
+
+              {/* Content */}
+              <div style={{flex:1,minWidth:0}} onClick={()=>{setEditTodo(todo);setShowForm(true);}}>
+                <div style={{fontSize:14,fontWeight:600,color:todo.done&&!active?C.tm:C.txt,textDecoration:todo.done&&!active?"line-through":"none",lineHeight:1.4,marginBottom:4,wordBreak:"break-word"}}>
+                  {todo.text}
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:5,alignItems:"center"}}>
+                  {todo.flagged&&active&&<span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:11,fontWeight:700,color:C.acc,background:"#FFF3EE",padding:"2px 7px",borderRadius:99}}>
+                    <Ico t="flag" sz={10} c={C.acc}/>Priority
+                  </span>}
+                  {todo.recur&&<span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:11,fontWeight:600,color:C.ts,background:C.pb,padding:"2px 7px",borderRadius:99}}>
+                    <Ico t="repeat" sz={10} c={C.ts}/>{todo.recur}
+                  </span>}
+                  {todo.dueDate&&<span style={{fontSize:11,fontWeight:600,padding:"2px 7px",borderRadius:99,
+                    background:overdue?"#FFF0EE":dueToday?C.pg:dueSoon?"#FFFBEE":C.pb,
+                    color:overdue?C.acc:dueToday?C.ok:dueSoon?"#B45309":C.ts}}>
+                    {overdue&&"⚠ "}{fmtDue(todo.dueDate)}
+                  </span>}
+                </div>
+              </div>
+
+              {/* Flag quick-toggle */}
+              <button className="press-btn" onClick={()=>updTodo(todo.id,{flagged:!todo.flagged})} style={{flexShrink:0,background:"none",border:"none",cursor:"pointer",padding:"2px 0 0 4px"}}>
+                <Ico t="flag" sz={17} c={todo.flagged?C.acc:C.cb}/>
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {showForm&&<TodoForm existing={editTodo} onClose={()=>{setShowForm(false);setEditTodo(null);}}/>}
+    </>;
+  };
+
   // ─── Settings Tab ───
   const SettingsTab = () => {
     const [importStatus, setImportStatus] = useState(null); // null | 'success' | 'error'
@@ -1050,6 +1303,10 @@ function App() {
         <Ico t="home" sz={22} c={tab==="today"&&!isSubView?C.pri:C.tm}/>
         Today
       </button>
+      <button className={`nav-btn ${tab==="todos"&&!isSubView?"active":""}`} onClick={()=>{setTab("todos");if(isSubView)setView("home");}}>
+        <Ico t="todoList" sz={22} c={tab==="todos"&&!isSubView?C.pri:C.tm}/>
+        To-do
+      </button>
       <button className={`nav-btn ${tab==="heatmap"&&!isSubView?"active":""}`} onClick={()=>{setTab("heatmap");if(isSubView)setView("home");}}>
         <Ico t="grid" sz={22} c={tab==="heatmap"&&!isSubView?C.pri:C.tm}/>
         Heatmap
@@ -1095,6 +1352,8 @@ function App() {
           {wh.length>0&&<><div style={{fontSize:11,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.1em",padding:"16px 20px 8px"}}>Weekly</div>{wh.map(card)}</>}
         </>}
       </div>}
+
+      {tab==="todos"&&<div className="scroll-area tab-fade"><TodoTab/></div>}
 
       {tab==="heatmap"&&<div className="scroll-area tab-fade">
         <div style={{padding:"24px 20px 20px"}}>

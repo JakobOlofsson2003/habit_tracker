@@ -62,6 +62,18 @@
   }
   .heatmap-cell:hover{transform:scale(1.15);opacity:.85}
 
+  /* Card entrance animation */
+  @keyframes cardIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+  .card-enter{animation:cardIn .35s cubic-bezier(.22,1,.36,1) both}
+
+  /* Button press */
+  .press-btn{transition:transform .1s,opacity .1s}
+  .press-btn:active{transform:scale(0.94);opacity:0.85}
+
+  /* Tab fade */
+  @keyframes tabFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  .tab-fade{animation:tabFade .22s ease both}
+
   /* Scroll area above bottom nav */
   .scroll-area{padding-bottom:calc(68px + env(safe-area-inset-bottom))}
 </style>
@@ -82,7 +94,7 @@ const {BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Res
 
 // ─── Storage ───
 const SK = "habitTracker_v1";
-const load = () => { try { return JSON.parse(localStorage.getItem(SK)) || {habits:[],logs:{}}; } catch { return {habits:[],logs:{}}; } };
+const load = () => { try { return JSON.parse(localStorage.getItem(SK)) || {habits:[],logs:{}}; } catch(e) { return {habits:[],logs:{}}; } };
 const persist = (d) => localStorage.setItem(SK, JSON.stringify(d));
 
 // ─── Dates ───
@@ -123,7 +135,10 @@ const Ico = ({t,sz=20,c=C.ts}) => {
     home:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
     grid:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>,
     calendar:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
-    check:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+    settings:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
+    download:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+    upload:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
+    shield:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
   };
   return m[t]||null;
 };
@@ -311,7 +326,7 @@ function App() {
     const st=streak(h);
     const habitColor = h.color||C.pri;
 
-    return <div key={h.id} style={{...crd,borderLeft:`4px solid ${habitColor}`}}>
+    return <div key={h.id} className="card-enter press-btn" style={{...crd,borderLeft:`4px solid ${habitColor}`,animationDelay:`${data.habits.indexOf(h)*0.05}s`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
         <div style={{flex:1,minWidth:0}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
@@ -335,8 +350,8 @@ function App() {
       </div>
       <PBar val={isCnt?cntVal:Math.min(pr,1)} max={isCnt?h.goal:1} color={habitColor}/>
       <div style={{display:"flex",alignItems:"center",gap:8,marginTop:14}}>
-        <button style={{...tBtn,background:C.bg,border:`1.5px solid ${C.cb}`}} onClick={()=>doSub(h.id,isT,inc)}><Ico t="minus" sz={18} c={C.ts}/></button>
-        <button style={{...tBtn,flex:1,borderRadius:14,background:habitColor,color:"#fff",fontSize:15,fontWeight:700,height:48}} onClick={e=>{checkAndFire(e,h,isT,inc);doAdd(h.id,isT,inc);}}>
+        <button className="press-btn" style={{...tBtn,background:C.bg,border:`1.5px solid ${C.cb}`}} onClick={()=>doSub(h.id,isT,inc)}><Ico t="minus" sz={18} c={C.ts}/></button>
+        <button className="press-btn" style={{...tBtn,flex:1,borderRadius:14,background:habitColor,color:"#fff",fontSize:15,fontWeight:700,height:48}} onClick={e=>{checkAndFire(e,h,isT,inc);doAdd(h.id,isT,inc);}}>
           {isT?`+ ${fi(inc)}`:"+\u00a01"}
         </button>
       </div>
@@ -347,7 +362,7 @@ function App() {
   const PastLogModal = ({habit:h, onClose}) => {
     const isT=h.type==="time", isCnt=h.type==="counter";
     const inc=h.increment||60;
-    // Build last 14 days (excluding today)
+
     const days = useMemo(()=>{
       const out=[];
       for(let i=1;i<=14;i++){
@@ -358,20 +373,42 @@ function App() {
       return out;
     },[]);
 
-    const hitDay=(ds)=>{
-      const v=gl(h.id,ds);
-      if(h.type==="time") return v>=h.goal;
+    // Local copy of values — no parent re-renders on every tap
+    const [localVals, setLocalVals] = useState(()=>{
+      const init={};
+      days.forEach(({ds})=>{ init[ds]=data.logs[`${h.id}:${ds}`]||0; });
+      return init;
+    });
+
+    const adj = (ds, delta) => setLocalVals(prev=>({...prev,[ds]:Math.max(0,(prev[ds]||0)+delta)}));
+
+    const hitDay=(val, ds)=>{
+      if(h.type==="time") return val>=h.goal;
       if(h.type==="counter"){
         const dir=h.direction||"over";
-        const hasLog=(`${h.id}:${ds}`) in data.logs;
-        return dir==="under" ? (hasLog && v<=h.goal) : v>=h.goal;
+        const hasLog = val>0;
+        return dir==="under"?(hasLog&&val<=h.goal):val>=h.goal;
       }
-      return v>=(h.cycle==="daily"?h.goal:1);
+      return val>=(h.cycle==="daily"?h.goal:1);
     };
 
-    return <div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+    // Flush local state to parent on close
+    const handleClose = () => {
+      setData(p=>{
+        const newLogs={...p.logs};
+        days.forEach(({ds})=>{
+          const k=`${h.id}:${ds}`;
+          const v=localVals[ds]||0;
+          if(v>0) newLogs[k]=v;
+          else delete newLogs[k];
+        });
+        return {...p,logs:newLogs};
+      });
+      onClose();
+    };
+
+    return <div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)handleClose();}}>
       <div className="modal-sheet">
-        {/* Handle bar */}
         <div style={{display:"flex",justifyContent:"center",padding:"12px 0 0"}}>
           <div style={{width:36,height:4,borderRadius:99,background:C.cb}}/>
         </div>
@@ -380,31 +417,31 @@ function App() {
             <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22}}>{h.name}</div>
             <div style={{fontSize:12,color:C.tm,marginTop:2}}>Log past days</div>
           </div>
-          <button style={{...bGh,padding:"6px 10px",fontSize:13}} onClick={onClose}>Done</button>
+          <button style={{...bGh,padding:"6px 10px",fontSize:13}} onClick={handleClose}>Done</button>
         </div>
         <div style={{padding:"0 16px 24px"}}>
           {days.map(({ds,lbl:dl})=>{
-            const val=gl(h.id,ds);
-            const hit=hitDay(ds);
+            const val=localVals[ds]||0;
+            const hit=hitDay(val,ds);
             return <div key={ds} style={{background:C.card,borderRadius:14,padding:"14px 16px",marginBottom:8,boxShadow:C.sh,border:`1px solid ${hit?C.ok+"44":C.cb}`,display:"flex",alignItems:"center",gap:12}}>
               <div style={{width:6,height:36,borderRadius:99,background:hit?C.ok:C.pb,flexShrink:0}}/>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:14,fontWeight:600,marginBottom:2}}>{dl}</div>
                 <div style={{fontSize:12,color:C.tm}}>
-                  {isT ? ft(val) : `${val}${isCnt?"":" ×"}`}
-                  {hit && <span style={{marginLeft:6,color:C.ok,fontWeight:700}}>✓ Done</span>}
+                  {isT?ft(val):`${val}${isCnt?"":" ×"}`}
+                  {hit&&<span style={{marginLeft:6,color:C.ok,fontWeight:700}}>✓ Done</span>}
                 </div>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:6}}>
-                <button style={{width:36,height:36,borderRadius:10,border:`1.5px solid ${C.cb}`,background:C.bg,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}
-                  onClick={()=>setLog(h.id,ds,Math.max(0,val-(isT?inc:1)))}>
+                <button className="press-btn" style={{width:36,height:36,borderRadius:10,border:`1.5px solid ${C.cb}`,background:C.bg,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}
+                  onClick={()=>adj(ds,-(isT?inc:1))}>
                   <Ico t="minus" sz={16} c={C.ts}/>
                 </button>
                 <div style={{width:44,textAlign:"center",fontSize:14,fontWeight:700,color:C.txt}}>
                   {isT?fi(val):val}
                 </div>
-                <button style={{width:36,height:36,borderRadius:10,border:`1.5px solid ${C.cb}`,background:hit?C.pg:C.pri,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}
-                  onClick={()=>setLog(h.id,ds,val+(isT?inc:1))}>
+                <button className="press-btn" style={{width:36,height:36,borderRadius:10,border:`1.5px solid ${C.cb}`,background:hit?C.pg:C.pri,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}
+                  onClick={()=>adj(ds,(isT?inc:1))}>
                   <Ico t="plus" sz={16} c={hit?C.ok:"#fff"}/>
                 </button>
               </div>
@@ -866,6 +903,145 @@ function App() {
     </>;
   };
 
+  // ─── Settings Tab ───
+  const SettingsTab = () => {
+    const [importStatus, setImportStatus] = useState(null); // null | 'success' | 'error'
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const fileRef = useRef(null);
+
+    const exportJSON = () => {
+      const payload = { ...data, exportedAt: new Date().toISOString(), version: 1 };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `habits-backup-${today()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    const exportCSV = () => {
+      const rows = [["Habit","Date","Value","Goal","Type","Hit"]];
+      data.habits.forEach(h => {
+        Object.entries(data.logs).forEach(([k, v]) => {
+          if (!k.startsWith(h.id + ":")) return;
+          const ds = k.split(":")[1];
+          const hit = h.type==="time" ? v>=h.goal : h.type==="counter"
+            ? (h.direction==="under" ? v<=h.goal : v>=h.goal)
+            : v>=(h.cycle==="daily"?h.goal:1);
+          rows.push([h.name, ds, v, h.goal, h.type, hit?"yes":"no"]);
+        });
+      });
+      const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `habits-export-${today()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    const importJSON = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const parsed = JSON.parse(ev.target.result);
+          if (!parsed.habits || !parsed.logs) throw new Error("Invalid format");
+          setData({ habits: parsed.habits, logs: parsed.logs });
+          setImportStatus("success");
+          setTimeout(() => setImportStatus(null), 3000);
+        } catch(e) {
+          setImportStatus("error");
+          setTimeout(() => setImportStatus(null), 3000);
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = "";
+    };
+
+    const totalLogs = Object.keys(data.logs).length;
+    const firstLog = Object.keys(data.logs).sort()[0]?.split(":")[1] || null;
+
+    const sRow = (icon, label, sub, onClick, color=C.txt, right=null) => (
+      <button onClick={onClick} className="press-btn"
+        style={{width:"100%",background:"none",border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",
+          display:"flex",alignItems:"center",gap:14,padding:"14px 0",textAlign:"left",
+          borderBottom:`1px solid ${C.cb}`}}>
+        <div style={{width:38,height:38,borderRadius:12,background:C.pb,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+          <Ico t={icon} sz={18} c={color==="danger"?C.acc:color===C.txt?C.ts:color}/>
+        </div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:14,fontWeight:600,color:color==="danger"?C.acc:C.txt}}>{label}</div>
+          {sub&&<div style={{fontSize:12,color:C.tm,marginTop:1}}>{sub}</div>}
+        </div>
+        {right&&<div style={{fontSize:12,color:C.tm,fontWeight:600}}>{right}</div>}
+      </button>
+    );
+
+    return <div style={{padding:"0 20px"}} className="tab-fade">
+      {/* Data summary card */}
+      <div style={{background:C.card,borderRadius:16,padding:"18px 20px",marginBottom:20,boxShadow:C.sh,border:`1px solid ${C.cb}`}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14}}>Your Data</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+          {[
+            {l:"Habits",v:data.habits.length},
+            {l:"Log Entries",v:totalLogs},
+            {l:"Tracking Since",v:firstLog?new Date(firstLog+"T00:00:00").toLocaleString("en-US",{month:"short",day:"numeric"}):"—"},
+          ].map((x,i)=>(
+            <div key={i} style={{textAlign:"center"}}>
+              <div style={{fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.pri}}>{x.v}</div>
+              <div style={{fontSize:11,color:C.tm,marginTop:2}}>{x.l}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Export */}
+      <div style={{background:C.card,borderRadius:16,padding:"4px 20px",marginBottom:16,boxShadow:C.sh,border:`1px solid ${C.cb}`}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.08em",padding:"14px 0 4px"}}>Export</div>
+        {sRow("download","Export as JSON","Full backup — habits + all logs",exportJSON)}
+        {sRow("download","Export as CSV","Spreadsheet-friendly log data",exportCSV)}
+      </div>
+
+      {/* Import */}
+      <div style={{background:C.card,borderRadius:16,padding:"4px 20px",marginBottom:16,boxShadow:C.sh,border:`1px solid ${C.cb}`}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.08em",padding:"14px 0 4px"}}>Import & Restore</div>
+        {sRow("upload","Import JSON Backup","Restore from a previous export",()=>fileRef.current?.click())}
+        <input ref={fileRef} type="file" accept=".json" style={{display:"none"}} onChange={importJSON}/>
+        {importStatus==="success"&&<div style={{padding:"10px 0",fontSize:13,color:C.ok,fontWeight:600}}>✓ Data imported successfully</div>}
+        {importStatus==="error"&&<div style={{padding:"10px 0",fontSize:13,color:C.acc,fontWeight:600}}>✗ Invalid file — please use a habits JSON export</div>}
+      </div>
+
+      {/* Danger zone */}
+      <div style={{background:C.card,borderRadius:16,padding:"4px 20px",marginBottom:32,boxShadow:C.sh,border:`1px solid ${C.cb}`}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.08em",padding:"14px 0 4px"}}>Danger Zone</div>
+        {!showClearConfirm
+          ? sRow("trash","Clear All Data","Permanently delete all habits and logs",()=>setShowClearConfirm(true),"danger")
+          : <div style={{padding:"14px 0"}}>
+              <div style={{fontSize:14,fontWeight:600,color:C.acc,marginBottom:10}}>Are you sure? This cannot be undone.</div>
+              <div style={{display:"flex",gap:10}}>
+                <button className="press-btn" onClick={()=>{setData({habits:[],logs:{}});setShowClearConfirm(false);}}
+                  style={{flex:1,padding:"11px",borderRadius:12,background:C.acc,color:"#fff",border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:700,fontSize:14}}>
+                  Yes, delete everything
+                </button>
+                <button className="press-btn" onClick={()=>setShowClearConfirm(false)}
+                  style={{flex:1,padding:"11px",borderRadius:12,background:C.pb,color:C.txt,border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:700,fontSize:14}}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+        }
+      </div>
+
+      <div style={{textAlign:"center",fontSize:12,color:C.tm,paddingBottom:8}}>
+        Data is stored locally on this device.<br/>Export regularly to avoid data loss.
+      </div>
+    </div>;
+  };
+
   // ─── Bottom Nav ───
   const isSubView = view==="add"||view==="edit"||view==="stats";
   const NavBar = () => (
@@ -877,6 +1053,10 @@ function App() {
       <button className={`nav-btn ${tab==="heatmap"&&!isSubView?"active":""}`} onClick={()=>{setTab("heatmap");if(isSubView)setView("home");}}>
         <Ico t="grid" sz={22} c={tab==="heatmap"&&!isSubView?C.pri:C.tm}/>
         Heatmap
+      </button>
+      <button className={`nav-btn ${tab==="settings"&&!isSubView?"active":""}`} onClick={()=>{setTab("settings");if(isSubView)setView("home");}}>
+        <Ico t="settings" sz={22} c={tab==="settings"&&!isSubView?C.pri:C.tm}/>
+        Settings
       </button>
     </nav>
   );
@@ -895,7 +1075,7 @@ function App() {
 
     {/* ── Main tabs ── */}
     {!isSubView&&<>
-      {tab==="today"&&<div className="scroll-area">
+      {tab==="today"&&<div className="scroll-area tab-fade">
         <div style={{padding:"24px 20px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div>
             <div style={{fontSize:13,color:C.tm,fontWeight:500,letterSpacing:"0.04em",textTransform:"uppercase"}}>{ds}</div>
@@ -916,11 +1096,19 @@ function App() {
         </>}
       </div>}
 
-      {tab==="heatmap"&&<div className="scroll-area">
+      {tab==="heatmap"&&<div className="scroll-area tab-fade">
         <div style={{padding:"24px 20px 20px"}}>
           <div style={{fontSize:13,color:C.tm,fontWeight:500,letterSpacing:"0.04em",textTransform:"uppercase",marginBottom:4}}>Overview</div>
           <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-0.02em",marginBottom:20}}>Weekly Review</div>
           <HeatmapTab/>
+        </div>
+      </div>}
+
+      {tab==="settings"&&<div className="scroll-area tab-fade">
+        <div style={{padding:"24px 20px 20px"}}>
+          <div style={{fontSize:13,color:C.tm,fontWeight:500,letterSpacing:"0.04em",textTransform:"uppercase",marginBottom:4}}>Data</div>
+          <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-0.02em",marginBottom:20}}>Settings</div>
+          <SettingsTab/>
         </div>
       </div>}
     </>}

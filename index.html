@@ -162,11 +162,12 @@ const PBar = ({val, max, color=C.pri}) => {
 // ─── App ───
 function App() {
   const [data,setData]=useState(load);
-  const [view,setView]=useState("home");   // home | add | edit | stats
-  const [tab,setTab]=useState("today");    // today | heatmap
+  const [view,setView]=useState("home");   // home | add | edit | stats | todoAdd | todoEdit
+  const [tab,setTab]=useState("today");    // today | todos | heatmap | settings
   const [selH,setSelH]=useState(null);
   const [edH,setEdH]=useState(null);
-  const [pastLogModal,setPastLogModal]=useState(null); // {habit} or null
+  const [edT,setEdT]=useState(null);
+  const [pastLogModal,setPastLogModal]=useState(null);
 
   useEffect(()=>{persist(data);},[data]);
 
@@ -178,6 +179,9 @@ function App() {
   const updH=useCallback((id,u)=>setData(p=>({...p,habits:p.habits.map(h=>h.id===id?{...h,...u}:h)})),[]);
   const delH=useCallback(id=>setData(p=>({...p,habits:p.habits.filter(h=>h.id!==id),logs:Object.fromEntries(Object.entries(p.logs).filter(([k])=>!k.startsWith(id+":")))})),[]);
   const setLog=useCallback((id,ds,val)=>setData(p=>({...p,logs:{...p.logs,[`${id}:${ds}`]:Math.max(0,val)}})),[]);
+  const addTodo=useCallback(t=>setData(p=>({...p,todos:[...p.todos,{...t,id:Date.now().toString()}]})),[]);
+  const updTodo=useCallback((id,u)=>setData(p=>({...p,todos:p.todos.map(t=>t.id===id?{...t,...u}:t)})),[]);
+  const delTodo=useCallback(id=>setData(p=>({...p,todos:p.todos.filter(t=>t.id!==id)})),[]);
 
   const streak=useCallback(h=>{
     let s=0;
@@ -911,17 +915,12 @@ function App() {
 
   // ─── Todo Tab ───
   const TodoTab = () => {
-    const [showForm, setShowForm] = useState(false);
-    const [editTodo, setEditTodo] = useState(null);
     const [filter, setFilter] = useState("active"); // active | done | all
     const ts = today();
 
     // todo shape: {id, text, done, flagged, dueDate, recur, completedOn}
     // recur: null | "daily" | "weekly" | "monthly"
 
-    const addTodo = (t) => setData(p=>({...p, todos:[...p.todos, {...t, id:Date.now().toString()}]}));
-    const updTodo = (id, u) => setData(p=>({...p, todos:p.todos.map(t=>t.id===id?{...t,...u}:t)}));
-    const delTodo = (id) => setData(p=>({...p, todos:p.todos.filter(t=>t.id!==id)}));
 
     const toggleDone = (todo) => {
       if(todo.recur && !todo.done) {
@@ -985,89 +984,6 @@ function App() {
     const doneCount = (data.todos||[]).filter(t=>t.done&&!isActiveToday(t)).length;
 
     // ── Todo Form (add/edit sheet) ──
-    const TodoForm = ({existing:ex, onClose}) => {
-      const [text, setText] = useState(ex?.text||"");
-      const [flagged, setFlagged] = useState(ex?.flagged||false);
-      const [dueDate, setDueDate] = useState(ex?.dueDate||"");
-      const [recur, setRecur] = useState(ex?.recur||null);
-
-      const save = () => {
-        if(!text.trim()) return;
-        const t = {text:text.trim(), flagged, dueDate:dueDate||null, recur, done:ex?.done||false, completedOn:ex?.completedOn||null};
-        if(ex) updTodo(ex.id, t); else addTodo(t);
-        onClose();
-      };
-
-      const recurOpts = [{l:"None",v:null},{l:"Daily",v:"daily"},{l:"Weekly",v:"weekly"},{l:"Monthly",v:"monthly"}];
-
-      return (
-        <div style={{position:"fixed",inset:0,background:"rgba(27,27,24,.45)",zIndex:200,animation:"fadeIn .2s ease",overflowY:"auto",WebkitOverflowScrolling:"touch",display:"flex",flexDirection:"column",justifyContent:"flex-end",alignItems:"center"}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-          <div style={{background:"#F7F5F0",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:480,flexShrink:0,paddingBottom:"calc(env(safe-area-inset-bottom) + 8px)",animation:"slideUp .25s cubic-bezier(.34,1.56,.64,1)"}}>
-            <div style={{display:"flex",justifyContent:"center",padding:"12px 0 0"}}>
-              <div style={{width:36,height:4,borderRadius:99,background:C.cb}}/>
-            </div>
-            <div style={{padding:"16px 20px 20px"}}>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
-                <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22}}>{ex?"Edit To-do":"New To-do"}</div>
-                <button style={{background:"none",border:"none",cursor:"pointer",padding:4}} onClick={onClose}><Ico t="close" sz={20} c={C.tm}/></button>
-              </div>
-
-              {/* Text input */}
-              <textarea
-                style={{width:"100%",padding:"12px 14px",borderRadius:12,border:`1.5px solid ${C.cb}`,fontFamily:"'DM Sans',sans-serif",fontSize:15,color:C.txt,background:C.bg,outline:"none",resize:"none",minHeight:72,lineHeight:1.5}}
-                placeholder="What needs to be done?"
-                value={text}
-                onChange={e=>setText(e.target.value)}
-              />
-
-              {/* Flag toggle */}
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:16,padding:"12px 14px",background:C.card,borderRadius:12,border:`1.5px solid ${flagged?"#E76F51":C.cb}`}}>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <Ico t="flag" sz={18} c={flagged?C.acc:C.tm}/>
-                  <span style={{fontSize:14,fontWeight:600,color:flagged?C.acc:C.txt}}>Priority / Flagged</span>
-                </div>
-                <button onClick={()=>setFlagged(f=>!f)} style={{width:44,height:26,borderRadius:99,background:flagged?C.acc:C.pb,border:"none",cursor:"pointer",position:"relative",transition:"background .2s"}}>
-                  <div style={{position:"absolute",top:3,left:flagged?21:3,width:20,height:20,borderRadius:99,background:"#fff",boxShadow:"0 1px 3px rgba(0,0,0,.2)",transition:"left .2s"}}/>
-                </button>
-              </div>
-
-              {/* Due date */}
-              <div style={{marginTop:12}}>
-                <label style={{fontSize:12,fontWeight:700,color:C.ts,textTransform:"uppercase",letterSpacing:"0.06em",display:"block",marginBottom:6}}>Due Date</label>
-                <input type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}
-                  style={{width:"100%",padding:"11px 14px",borderRadius:12,border:`1.5px solid ${C.cb}`,fontFamily:"'DM Sans',sans-serif",fontSize:15,color:dueDate?C.txt:C.tm,background:C.bg,outline:"none"}}
-                />
-                {dueDate&&<button onClick={()=>setDueDate("")} style={{background:"none",border:"none",cursor:"pointer",fontSize:12,color:C.tm,marginTop:4,padding:0}}>Clear date</button>}
-              </div>
-
-              {/* Recurrence */}
-              <div style={{marginTop:14}}>
-                <label style={{fontSize:12,fontWeight:700,color:C.ts,textTransform:"uppercase",letterSpacing:"0.06em",display:"block",marginBottom:8}}>Repeat</label>
-                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                  {recurOpts.map(o=>(
-                    <button key={String(o.v)} onClick={()=>setRecur(o.v)}
-                      style={{padding:"7px 14px",borderRadius:99,border:`1.5px solid ${recur===o.v?C.pri:C.cb}`,background:recur===o.v?C.pg:"transparent",color:recur===o.v?C.pri:C.ts,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-                      {o.l}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Save */}
-              <button onClick={save} className="press-btn"
-                style={{marginTop:20,width:"100%",padding:"14px",borderRadius:12,background:C.pri,color:"#fff",border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:700,fontSize:15}}>
-                {ex?"Save Changes":"Add To-do"}
-              </button>
-              {ex&&<button onClick={()=>{delTodo(ex.id);onClose();}} className="press-btn"
-                style={{marginTop:10,width:"100%",padding:"12px",borderRadius:12,background:"none",color:C.acc,border:`1.5px solid ${C.cb}`,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-                <Ico t="trash" sz={15} c={C.acc}/> Delete
-              </button>}
-            </div>
-          </div>
-        </div>
-      );
-    };
-
     return <>
       {/* Header */}
       <div style={{padding:"24px 20px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -1075,7 +991,7 @@ function App() {
           <div style={{fontSize:13,color:C.tm,fontWeight:500,letterSpacing:"0.04em",textTransform:"uppercase"}}>{new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
           <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-0.02em"}}>To-do</div>
         </div>
-        <button className="press-btn" style={{width:44,height:44,borderRadius:14,background:C.pri,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:C.shL}} onClick={()=>{setEditTodo(null);setShowForm(true);}}>
+        <button className="press-btn" style={{width:44,height:44,borderRadius:14,background:C.pri,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:C.shL}} onClick={()=>{setEdT(null);setView("todoAdd");}}>
           <Ico t="plus" sz={20} c="#fff"/>
         </button>
       </div>
@@ -1124,7 +1040,7 @@ function App() {
               </button>
 
               {/* Content */}
-              <div style={{flex:1,minWidth:0}} onClick={()=>{setEditTodo(todo);setShowForm(true);}}>
+              <div style={{flex:1,minWidth:0}} onClick={()=>{setEdT(todo);setView("todoEdit");}}>
                 <div style={{fontSize:14,fontWeight:600,color:todo.done&&!active?C.tm:C.txt,textDecoration:todo.done&&!active?"line-through":"none",lineHeight:1.4,marginBottom:4,wordBreak:"break-word"}}>
                   {todo.text}
                 </div>
@@ -1152,7 +1068,83 @@ function App() {
         })}
       </div>
 
-      {showForm&&<TodoForm existing={editTodo} onClose={()=>{setShowForm(false);setEditTodo(null);}}/>}
+    </>;
+  };
+
+  // ─── Todo Form View (full page, like FormView) ───
+  const TodoFormView = ({existing:ex}) => {
+    const [text, setText] = useState(ex?.text||"");
+    const [flagged, setFlagged] = useState(ex?.flagged||false);
+    const [dueDate, setDueDate] = useState(ex?.dueDate||"");
+    const [recur, setRecur] = useState(ex?.recur||null);
+
+    const recurOpts = [{l:"None",v:null},{l:"Daily",v:"daily"},{l:"Weekly",v:"weekly"},{l:"Monthly",v:"monthly"}];
+    const ipt={width:"100%",padding:"12px 16px",borderRadius:12,border:`1.5px solid ${C.cb}`,fontFamily:"'DM Sans',sans-serif",fontSize:15,color:C.txt,background:C.bg,outline:"none",boxSizing:"border-box"};
+    const lbl={fontSize:12,fontWeight:600,color:C.ts,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6,display:"block"};
+    const chip=a=>({padding:"8px 16px",borderRadius:99,border:`1.5px solid ${a?C.pri:C.cb}`,background:a?C.pg:"transparent",color:a?C.pri:C.ts,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"});
+
+    const save = () => {
+      if(!text.trim()) return;
+      const t = {text:text.trim(), flagged, dueDate:dueDate||null, recur, done:ex?.done||false, completedOn:ex?.completedOn||null};
+      if(ex) updTodo(ex.id, t); else addTodo(t);
+      setView("home"); setEdT(null);
+    };
+
+    return <>
+      <div style={{padding:"24px 20px 16px",display:"flex",alignItems:"center"}}>
+        <button style={{background:"transparent",color:C.ts,padding:"8px 0",fontSize:14,border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600,display:"inline-flex",alignItems:"center",gap:4}}
+          onClick={()=>{setView("home");setEdT(null);}}>
+          <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke={C.txt} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          <span style={{marginLeft:4,color:C.txt,fontWeight:600}}>Back</span>
+        </button>
+      </div>
+      <div style={{padding:"0 20px"}}>
+        <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,marginBottom:24}}>{ex?"Edit To-do":"New To-do"}</div>
+
+        <div style={{marginBottom:20}}>
+          <label style={lbl}>What needs to be done?</label>
+          <textarea value={text} onChange={e=>setText(e.target.value)}
+            style={{...ipt,resize:"none",minHeight:88,lineHeight:1.5}}
+            placeholder="e.g. Buy groceries, Call dentist..."/>
+        </div>
+
+        <div style={{marginBottom:20}}>
+          <label style={lbl}>Priority</label>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",background:C.card,borderRadius:12,border:`1.5px solid ${flagged?"#E76F51":C.cb}`}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <Ico t="flag" sz={18} c={flagged?C.acc:C.tm}/>
+              <span style={{fontSize:14,fontWeight:600,color:flagged?C.acc:C.txt}}>Flag as priority</span>
+            </div>
+            <button onClick={()=>setFlagged(f=>!f)} style={{width:44,height:26,borderRadius:99,background:flagged?C.acc:C.pb,border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
+              <div style={{position:"absolute",top:3,left:flagged?21:3,width:20,height:20,borderRadius:99,background:"#fff",boxShadow:"0 1px 3px rgba(0,0,0,.2)",transition:"left .2s"}}/>
+            </button>
+          </div>
+        </div>
+
+        <div style={{marginBottom:20}}>
+          <label style={lbl}>Due Date</label>
+          <input type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)} style={ipt}/>
+          {dueDate&&<button onClick={()=>setDueDate("")} style={{background:"none",border:"none",cursor:"pointer",fontSize:12,color:C.tm,marginTop:6,padding:0,fontFamily:"'DM Sans',sans-serif"}}>Clear date</button>}
+        </div>
+
+        <div style={{marginBottom:28}}>
+          <label style={lbl}>Repeat</label>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {recurOpts.map(o=>(
+              <button key={String(o.v)} onClick={()=>setRecur(o.v)} style={chip(recur===o.v)}>{o.l}</button>
+            ))}
+          </div>
+        </div>
+
+        <button onClick={save} className="press-btn"
+          style={{border:"none",borderRadius:12,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600,background:C.pri,color:"#fff",padding:"14px 24px",fontSize:15,width:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {ex?"Save Changes":"Add To-do"}
+        </button>
+        {ex&&<button onClick={()=>{delTodo(ex.id);setView("home");setEdT(null);}} className="press-btn"
+          style={{background:"transparent",color:C.acc,padding:"12px 24px",fontSize:14,border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600,width:"100%",marginTop:8,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+          <Ico t="trash" sz={16} c={C.acc}/> Delete To-do
+        </button>}
+      </div>
     </>;
   };
 
@@ -1203,7 +1195,7 @@ function App() {
         try {
           const parsed = JSON.parse(ev.target.result);
           if (!parsed.habits || !parsed.logs) throw new Error("Invalid format");
-          setData({ habits: parsed.habits, logs: parsed.logs });
+          setData({ habits: parsed.habits, logs: parsed.logs, todos: parsed.todos||[] });
           setImportStatus("success");
           setTimeout(() => setImportStatus(null), 3000);
         } catch(e) {
@@ -1296,7 +1288,7 @@ function App() {
   };
 
   // ─── Bottom Nav ───
-  const isSubView = view==="add"||view==="edit"||view==="stats";
+  const isSubView = view==="add"||view==="edit"||view==="stats"||view==="todoAdd"||view==="todoEdit";
   const NavBar = () => (
     <nav className="bottom-nav">
       <button className={`nav-btn ${tab==="today"&&!isSubView?"active":""}`} onClick={()=>{setTab("today");if(isSubView)setView("home");}}>
@@ -1329,6 +1321,8 @@ function App() {
     {view==="add"&&<div className="scroll-area"><FormView existing={null}/></div>}
     {view==="edit"&&edH&&<div className="scroll-area"><FormView existing={edH}/></div>}
     {view==="stats"&&selH&&<div className="scroll-area"><Stats habit={selH}/></div>}
+    {view==="todoAdd"&&<div className="scroll-area"><TodoFormView existing={null}/></div>}
+    {view==="todoEdit"&&edT&&<div className="scroll-area"><TodoFormView existing={edT}/></div>}
 
     {/* ── Main tabs ── */}
     {!isSubView&&<>

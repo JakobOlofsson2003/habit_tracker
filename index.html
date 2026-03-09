@@ -13,8 +13,57 @@
 <style>
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   body{background:#F7F5F0;font-family:'DM Sans',-apple-system,sans-serif;color:#1B1B18;overflow-x:hidden}
-  html{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  html{padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left)}
   #loading{display:flex;align-items:center;justify-content:center;height:100vh;font-family:'DM Sans',sans-serif;color:#A3A394;font-size:15px}
+
+  /* Bottom nav */
+  .bottom-nav{
+    position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+    width:100%;max-width:480px;
+    background:rgba(247,245,240,0.92);
+    backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+    border-top:1px solid #E8E4DC;
+    display:flex;align-items:stretch;
+    padding-bottom:env(safe-area-inset-bottom);
+    z-index:100;
+  }
+  .nav-btn{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:10px 0 8px;gap:4px;
+    background:none;border:none;cursor:pointer;
+    font-family:'DM Sans',sans-serif;font-size:10px;font-weight:600;
+    letter-spacing:0.05em;text-transform:uppercase;
+    color:#A3A394;transition:color .15s;
+  }
+  .nav-btn.active{color:#2D6A4F}
+  .nav-btn svg{transition:transform .15s}
+  .nav-btn.active svg{transform:scale(1.1)}
+
+  /* Past-day log modal */
+  .modal-overlay{
+    position:fixed;inset:0;background:rgba(27,27,24,.45);
+    display:flex;align-items:flex-end;justify-content:center;
+    z-index:200;animation:fadeIn .2s ease;
+  }
+  .modal-sheet{
+    background:#F7F5F0;border-radius:24px 24px 0 0;
+    width:100%;max-width:480px;
+    padding:0 0 env(safe-area-inset-bottom);
+    max-height:80vh;overflow-y:auto;
+    animation:slideUp .25s cubic-bezier(.34,1.56,.64,1);
+  }
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  @keyframes slideUp{from{transform:translateY(60px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+  /* Heatmap */
+  .heatmap-cell{
+    width:100%;aspect-ratio:1;border-radius:4px;
+    cursor:pointer;transition:transform .1s,opacity .1s;
+  }
+  .heatmap-cell:hover{transform:scale(1.15);opacity:.85}
+
+  /* Scroll area above bottom nav */
+  .scroll-area{padding-bottom:calc(68px + env(safe-area-inset-bottom))}
 </style>
 </head>
 <body>
@@ -28,7 +77,7 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
 
 <script type="text/babel" data-type="module">
-const {useState, useEffect, useCallback, useMemo} = React;
+const {useState, useEffect, useCallback, useMemo, useRef} = React;
 const {BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine} = Recharts;
 
 // ─── Storage ───
@@ -36,7 +85,7 @@ const SK = "habitTracker_v1";
 const load = () => { try { return JSON.parse(localStorage.getItem(SK)) || {habits:[],logs:{}}; } catch { return {habits:[],logs:{}}; } };
 const persist = (d) => localStorage.setItem(SK, JSON.stringify(d));
 
-// ─── Dates (all local time) ───
+// ─── Dates ───
 const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const today = () => fmt(new Date());
 const weekStart = (ds) => { const d=new Date(ds+"T00:00:00"); const dy=d.getDay(); d.setDate(d.getDate()-(dy===0?6:dy-1)); return fmt(d); };
@@ -44,6 +93,8 @@ const daysInRange = (a,b) => { const r=[],d=new Date(a+"T00:00:00"),e=new Date(b
 const weekDaysOf = (ds) => { const ws=weekStart(ds); const ed=new Date(ws+"T00:00:00"); ed.setDate(ed.getDate()+6); return daysInRange(ws,fmt(ed)); };
 const dayLbl = (ds) => ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][(()=>{const dy=new Date(ds+"T00:00:00").getDay(); return dy===0?6:dy-1;})()];
 const weeksBack = (n) => { const w=[],d=new Date(); for(let i=n-1;i>=0;i--){const x=new Date(d);x.setDate(x.getDate()-i*7);w.push(weekStart(fmt(x)));} return [...new Set(w)].slice(-n); };
+const monthName = (ds) => new Date(ds+"T00:00:00").toLocaleString("en-US",{month:"short"});
+const addDays = (ds, n) => { const d=new Date(ds+"T00:00:00"); d.setDate(d.getDate()+n); return fmt(d); };
 
 // ─── Theme ───
 const C = {
@@ -56,7 +107,7 @@ const C = {
 
 // ─── Icons ───
 const Ico = ({t,sz=20,c=C.ts}) => {
-  const s={width:sz,height:sz,display:"inline-block"};
+  const s={width:sz,height:sz,display:"inline-block",flexShrink:0};
   const m={
     plus:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
     chart:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
@@ -69,6 +120,10 @@ const Ico = ({t,sz=20,c=C.ts}) => {
     target:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,
     arrowUp:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>,
     arrowDown:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>,
+    home:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+    grid:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>,
+    calendar:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
+    check:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
   };
   return m[t]||null;
 };
@@ -86,9 +141,11 @@ const PBar = ({val, max, color=C.pri}) => {
 // ─── App ───
 function App() {
   const [data,setData]=useState(load);
-  const [view,setView]=useState("home");
+  const [view,setView]=useState("home");   // home | add | edit | stats
+  const [tab,setTab]=useState("today");    // today | heatmap
   const [selH,setSelH]=useState(null);
   const [edH,setEdH]=useState(null);
+  const [pastLogModal,setPastLogModal]=useState(null); // {habit} or null
 
   useEffect(()=>{persist(data);},[data]);
 
@@ -99,8 +156,8 @@ function App() {
   const addH=useCallback(h=>setData(p=>({...p,habits:[...p.habits,{...h,id:Date.now().toString()}]})),[]);
   const updH=useCallback((id,u)=>setData(p=>({...p,habits:p.habits.map(h=>h.id===id?{...h,...u}:h)})),[]);
   const delH=useCallback(id=>setData(p=>({...p,habits:p.habits.filter(h=>h.id!==id),logs:Object.fromEntries(Object.entries(p.logs).filter(([k])=>!k.startsWith(id+":")))})),[]);
+  const setLog=useCallback((id,ds,val)=>setData(p=>({...p,logs:{...p.logs,[`${id}:${ds}`]:Math.max(0,val)}})),[]);
 
-  // ─── Streak — works for all 3 types ───
   const streak=useCallback(h=>{
     let s=0;
     const isUnder = h.type==="counter" && h.direction==="under";
@@ -140,7 +197,6 @@ function App() {
   const ft=m=>{if(m<60)return`${m}m`;const h=Math.floor(m/60),r=m%60;return r>0?`${h}h ${r}m`:`${h}h`;};
   const fi=m=>{if(m<60)return`${m}m`;if(m%60===0)return`${m/60}h`;return`${Math.floor(m/60)}h${m%60}m`;};
 
-  // ─── Progress calculation — handles counter type ───
   const prog=h=>{
     const tv=gl(h.id,ts),wt=wd.reduce((s,d)=>s+gl(h.id,d),0),isT=h.type==="time";
     const isCnt=h.type==="counter";
@@ -151,7 +207,7 @@ function App() {
       const val=isWeekly?wt:tv;
       cur=`${val}`;
       gd=`${dir==="under"?"<":">"} ${h.goal}/${isWeekly?"wk":"day"}`;
-      p = val/h.goal; // fills left→right; ≥1 means over the limit for "under"
+      p = val/h.goal;
     } else if(isT){
       if(h.cycle==="daily"){p=tv/h.goal;cur=ft(tv);gd=ft(h.goal);}
       else{p=wt/(h.goal*7);cur=ft(wt);gd=ft(h.goal*7)+"/wk";}
@@ -161,6 +217,74 @@ function App() {
     }
     return{p,cur,gd,tv,wt,isT,isCnt};
   };
+
+  // ─── Confetti ───
+  const [confetti, setConfetti] = useState(null);
+  const firedToday = useRef({}); // {habitId: true} — once fired today, never fires again this session
+
+  const launchConfetti = useCallback((e, color) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    setConfetti({x, y, color, key: Date.now()});
+    setTimeout(() => setConfetti(null), 1200);
+  }, []);
+
+  const Confetti = ({x, y, color}) => {
+    const canvasRef = useRef(null);
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const pieces = Array.from({length: 52}, () => ({
+        x, y,
+        vx: (Math.random() - 0.5) * 14,
+        vy: Math.random() * -12 - 4,
+        rot: Math.random() * 360,
+        rotV: (Math.random() - 0.5) * 12,
+        size: Math.random() * 7 + 4,
+        color: [color, C.ok, "#E9C46A", "#fff", C.acc][Math.floor(Math.random() * 5)],
+        shape: Math.random() > 0.5 ? "rect" : "circle",
+        alpha: 1,
+      }));
+      let frame;
+      const draw = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        pieces.forEach(p => {
+          p.x += p.vx; p.y += p.vy; p.vy += 0.55;
+          p.vx *= 0.98; p.rot += p.rotV; p.alpha -= 0.018;
+          if (p.alpha <= 0) return;
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, p.alpha);
+          ctx.fillStyle = p.color;
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rot * Math.PI / 180);
+          if (p.shape === "rect") ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size * 0.55);
+          else { ctx.beginPath(); ctx.arc(0, 0, p.size/2, 0, Math.PI*2); ctx.fill(); }
+          ctx.restore();
+        });
+        if (pieces.some(p => p.alpha > 0)) frame = requestAnimationFrame(draw);
+      };
+      draw();
+      return () => cancelAnimationFrame(frame);
+    }, []);
+    return <canvas ref={canvasRef} style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:999}}/>;
+  };
+
+  const checkAndFire = useCallback((e, h, isT, inc) => {
+    if (h.type === "counter") return;
+    if (firedToday.current[h.id]) return; // already fired once this session for this habit
+    const k = `${h.id}:${ts}`;
+    const cur = data.logs[k] || 0;
+    if (cur >= h.goal) return; // already done before this tap
+    const next = cur + (isT ? inc : 1);
+    if (next >= h.goal) {
+      firedToday.current[h.id] = true; // lock it — will never fire again this session
+      launchConfetti(e, h.color||C.pri);
+    }
+  }, [data.logs, ts, launchConfetti]);
 
   const doAdd=useCallback((id,isT,inc)=>setData(p=>{const k=`${id}:${ts}`,c=p.logs[k]||0;return{...p,logs:{...p.logs,[k]:c+(isT?inc:1)}};}),[ts]);
   const doSub=useCallback((id,isT,inc)=>setData(p=>{const k=`${id}:${ts}`,c=p.logs[k]||0;return{...p,logs:{...p.logs,[k]:Math.max(0,c-(isT?inc:1))}};}),[ts]);
@@ -173,7 +297,7 @@ function App() {
   const chip=a=>({padding:"8px 16px",borderRadius:99,border:`1.5px solid ${a?C.pri:C.cb}`,background:a?C.pg:"transparent",color:a?C.pri:C.ts,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"});
   const lbl={fontSize:12,fontWeight:600,color:C.ts,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6,display:"block"};
 
-  // ─── Card renderer ───
+  // ─── Habit card ───
   const card=h=>{
     const{p:pr,cur,gd,isT,isCnt}=prog(h);
     const inc=h.increment||60;
@@ -181,22 +305,19 @@ function App() {
     const tv=gl(h.id,ts);
     const isWeekly=isCnt&&h.cycle==="weekly";
     const cntVal=isWeekly?wd.reduce((s,d)=>s+gl(h.id,d),0):tv;
-    const done = isCnt
-      ? (dir==="under" ? cntVal<=h.goal : cntVal>=h.goal)
-      : pr>=1;
+    const isUnder = isCnt && dir==="under";
+    const underOver = isUnder && cntVal>h.goal;
+    const done = isUnder ? false : (isCnt ? cntVal>=h.goal : pr>=1);
     const st=streak(h);
-    // For "under": green when at/under goal, red when over; bar fills left→right showing how close to limit
-    const underOver = isCnt && dir==="under" && cntVal>h.goal;
-    const barColor = isCnt
-      ? (dir==="under" ? (underOver ? C.acc : C.ok) : h.color||C.pri)
-      : (done ? C.ok : h.color||C.pri);
+    const habitColor = h.color||C.pri;
 
-    return <div key={h.id} style={{...crd,borderLeft:`4px solid ${done?C.ok:(underOver?C.acc:h.color||C.pri)}`}}>
+    return <div key={h.id} style={{...crd,borderLeft:`4px solid ${habitColor}`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-        <div style={{flex:1}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
             <span style={{fontSize:16,fontWeight:700}}>{h.name}</span>
             {done&&<span style={{fontSize:12,background:C.pg,color:C.ok,padding:"2px 8px",borderRadius:99,fontWeight:700}}>✓</span>}
+            {underOver&&<span style={{fontSize:12,background:"#FFE8E3",color:C.acc,padding:"2px 8px",borderRadius:99,fontWeight:700}}>✗</span>}
             {isCnt&&<span style={{fontSize:11,display:"inline-flex",alignItems:"center",gap:3,background:dir==="under"?C.underPg:C.pg,color:dir==="under"?C.under:C.ok,padding:"2px 8px",borderRadius:99,fontWeight:700}}>
               <Ico t={dir==="under"?"arrowDown":"arrowUp"} sz={11} c={dir==="under"?C.under:C.ok}/>
               {dir==="under"?"Stay Under":"Stay Over"}
@@ -207,19 +328,382 @@ function App() {
             {st>0&&<span style={{marginLeft:10,color:C.acc}}>🔥 {st} {h.cycle==="daily"?"day":"week"} streak</span>}
           </div>
         </div>
-        <button style={{...bGh,padding:"6px 8px"}} onClick={()=>{setSelH(h);setView("stats");}}><Ico t="chart" sz={18} c={C.tm}/></button>
+        <div style={{display:"flex",gap:4}}>
+          <button style={{...bGh,padding:"6px 8px"}} title="Log past days" onClick={()=>setPastLogModal(h)}><Ico t="calendar" sz={18} c={C.tm}/></button>
+          <button style={{...bGh,padding:"6px 8px"}} onClick={()=>{setSelH(h);setView("stats");}}><Ico t="chart" sz={18} c={C.tm}/></button>
+        </div>
       </div>
-      <PBar val={isCnt?cntVal:Math.min(pr,1)} max={isCnt?h.goal:1} color={barColor}/>
+      <PBar val={isCnt?cntVal:Math.min(pr,1)} max={isCnt?h.goal:1} color={habitColor}/>
       <div style={{display:"flex",alignItems:"center",gap:8,marginTop:14}}>
         <button style={{...tBtn,background:C.bg,border:`1.5px solid ${C.cb}`}} onClick={()=>doSub(h.id,isT,inc)}><Ico t="minus" sz={18} c={C.ts}/></button>
-        <button style={{...tBtn,flex:1,borderRadius:14,background:done?C.pg:(underOver?C.acc+"22":h.color||C.pri),color:done?C.ok:(underOver?C.acc:"#fff"),fontSize:15,fontWeight:700,height:48}} onClick={()=>doAdd(h.id,isT,inc)}>
+        <button style={{...tBtn,flex:1,borderRadius:14,background:habitColor,color:"#fff",fontSize:15,fontWeight:700,height:48}} onClick={e=>{checkAndFire(e,h,isT,inc);doAdd(h.id,isT,inc);}}>
           {isT?`+ ${fi(inc)}`:"+\u00a01"}
         </button>
       </div>
     </div>;
   };
 
-  // ─── Add/Edit ───
+  // ─── Past Day Log Modal ───
+  const PastLogModal = ({habit:h, onClose}) => {
+    const isT=h.type==="time", isCnt=h.type==="counter";
+    const inc=h.increment||60;
+    // Build last 14 days (excluding today)
+    const days = useMemo(()=>{
+      const out=[];
+      for(let i=1;i<=14;i++){
+        const d=new Date(); d.setDate(d.getDate()-i);
+        const ds=fmt(d);
+        out.push({ds, lbl:d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})});
+      }
+      return out;
+    },[]);
+
+    const hitDay=(ds)=>{
+      const v=gl(h.id,ds);
+      if(h.type==="time") return v>=h.goal;
+      if(h.type==="counter"){
+        const dir=h.direction||"over";
+        const hasLog=(`${h.id}:${ds}`) in data.logs;
+        return dir==="under" ? (hasLog && v<=h.goal) : v>=h.goal;
+      }
+      return v>=(h.cycle==="daily"?h.goal:1);
+    };
+
+    return <div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="modal-sheet">
+        {/* Handle bar */}
+        <div style={{display:"flex",justifyContent:"center",padding:"12px 0 0"}}>
+          <div style={{width:36,height:4,borderRadius:99,background:C.cb}}/>
+        </div>
+        <div style={{padding:"16px 20px 8px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontFamily:"'DM Serif Display',serif",fontSize:22}}>{h.name}</div>
+            <div style={{fontSize:12,color:C.tm,marginTop:2}}>Log past days</div>
+          </div>
+          <button style={{...bGh,padding:"6px 10px",fontSize:13}} onClick={onClose}>Done</button>
+        </div>
+        <div style={{padding:"0 16px 24px"}}>
+          {days.map(({ds,lbl:dl})=>{
+            const val=gl(h.id,ds);
+            const hit=hitDay(ds);
+            return <div key={ds} style={{background:C.card,borderRadius:14,padding:"14px 16px",marginBottom:8,boxShadow:C.sh,border:`1px solid ${hit?C.ok+"44":C.cb}`,display:"flex",alignItems:"center",gap:12}}>
+              <div style={{width:6,height:36,borderRadius:99,background:hit?C.ok:C.pb,flexShrink:0}}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:14,fontWeight:600,marginBottom:2}}>{dl}</div>
+                <div style={{fontSize:12,color:C.tm}}>
+                  {isT ? ft(val) : `${val}${isCnt?"":" ×"}`}
+                  {hit && <span style={{marginLeft:6,color:C.ok,fontWeight:700}}>✓ Done</span>}
+                </div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <button style={{width:36,height:36,borderRadius:10,border:`1.5px solid ${C.cb}`,background:C.bg,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}
+                  onClick={()=>setLog(h.id,ds,Math.max(0,val-(isT?inc:1)))}>
+                  <Ico t="minus" sz={16} c={C.ts}/>
+                </button>
+                <div style={{width:44,textAlign:"center",fontSize:14,fontWeight:700,color:C.txt}}>
+                  {isT?fi(val):val}
+                </div>
+                <button style={{width:36,height:36,borderRadius:10,border:`1.5px solid ${C.cb}`,background:hit?C.pg:C.pri,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}
+                  onClick={()=>setLog(h.id,ds,val+(isT?inc:1))}>
+                  <Ico t="plus" sz={16} c={hit?C.ok:"#fff"}/>
+                </button>
+              </div>
+            </div>;
+          })}
+        </div>
+      </div>
+    </div>;
+  };
+
+  // ─── Heatmap Tab ───
+  const HeatmapTab = () => {
+    const [weekOffset, setWeekOffset] = useState(0);
+    const [selHabit, setSelHabit] = useState(data.habits[0]||null);
+
+    useEffect(()=>{
+      if(!selHabit && data.habits.length>0) setSelHabit(data.habits[0]);
+    },[data.habits]);
+
+    if(data.habits.length===0) return (
+      <div style={{textAlign:"center",padding:"60px 40px",color:C.tm}}>
+        <div style={{fontSize:48,marginBottom:16}}>📅</div>
+        <div style={{fontSize:17,fontWeight:600,color:C.txt,marginBottom:8}}>No habits yet</div>
+        <div style={{fontSize:14,lineHeight:1.5}}>Create habits on the Today tab to see your heatmap here.</div>
+      </div>
+    );
+
+    const todayDs = ts;
+    const todayDate = new Date(todayDs+"T00:00:00");
+
+    // ── Helpers ──
+    const hexToRgb = hex => {
+      const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+      return[r,g,b];
+    };
+    const interpolate = (t, hex) => {
+      const [r,g,b]=hexToRgb(hex);
+      const bg=[237,235,229];
+      return `rgb(${Math.round(bg[0]+(r-bg[0])*t)},${Math.round(bg[1]+(g-bg[1])*t)},${Math.round(bg[2]+(b-bg[2])*t)})`;
+    };
+
+    const getDayIntensity = (hb, ds) => {
+      const hbIsT=hb.type==="time", hbIsCnt=hb.type==="counter";
+      const hbDir=hb.direction||"over";
+      const v=gl(hb.id,ds);
+      if(!v) return 0;
+      if(hbIsT) return Math.min(v/hb.goal,1);
+      if(hbIsCnt) return hbDir==="under"?(v<=hb.goal?1:0.25):Math.min(v/hb.goal,1);
+      const goal=hb.cycle==="daily"?hb.goal:Math.ceil(hb.goal/7);
+      return Math.min(v/Math.max(1,goal),1);
+    };
+
+    const getDayHit = (hb, ds) => {
+      const v=gl(hb.id,ds);
+      if(hb.type==="time") return v>=hb.goal;
+      if(hb.type==="counter"){
+        const hbDir=hb.direction||"over";
+        const hasLog=(`${hb.id}:${ds}`) in data.logs;
+        return hbDir==="under"?(hasLog&&v<=hb.goal):v>=hb.goal;
+      }
+      return v>=(hb.cycle==="daily"?hb.goal:1);
+    };
+
+    // ── Month calendar data ──
+    const year = todayDate.getFullYear();
+    const month = todayDate.getMonth();
+    const monthFirstDs = `${year}-${String(month+1).padStart(2,'0')}-01`;
+    const monthLastDs = fmt(new Date(year, month+1, 0));
+    const monthDays = daysInRange(monthFirstDs, monthLastDs);
+    const monthName2 = todayDate.toLocaleString("en-US",{month:"long",year:"numeric"});
+    const firstDow = new Date(monthFirstDs+"T00:00:00").getDay();
+    const offset = firstDow===0?6:firstDow-1;
+    const DAY_LABELS = ["M","T","W","T","F","S","S"];
+
+    const h = selHabit;
+    const isT = h?.type==="time";
+    const baseColor = h?.color||C.pri;
+
+    const getDayHitSel = (ds) => h ? getDayHit(h, ds) : false;
+    const monthPastDays = monthDays.filter(d=>d<=todayDs);
+    const hitCount = monthPastDays.filter(d=>getDayHitSel(d)).length;
+    const pct = monthPastDays.length>0?Math.round(hitCount/monthPastDays.length*100):0;
+    const st = streak(h||data.habits[0]);
+
+    // ── Week navigator data ──
+    const refDate = new Date(todayDs+"T00:00:00");
+    refDate.setDate(refDate.getDate()+weekOffset*7);
+    const viewWs = weekStart(fmt(refDate));
+    const viewDays = weekDaysOf(viewWs);
+    const isCurrentWeek = weekOffset===0;
+    const wkStartDate = new Date(viewWs+"T00:00:00");
+    const wkEndDate = new Date(viewDays[6]+"T00:00:00");
+    const wkLabel = `${wkStartDate.toLocaleString("en-US",{month:"short",day:"numeric"})} – ${wkEndDate.toLocaleString("en-US",{month:"short",day:"numeric"})}`;
+    const DAY_SHORT = ["Mo","Tu","We","Th","Fr","Sa","Su"];
+    const CELL = 32;
+
+    const calcWeekScore = () => {
+      let hits=0, possible=0;
+      data.habits.forEach(hb=>{
+        if(hb.cycle==="weekly"){
+          possible++;
+          const wt=viewDays.reduce((s,d)=>s+gl(hb.id,d),0);
+          let hit=false;
+          if(hb.type==="frequency") hit=wt>=hb.goal;
+          else if(hb.type==="time") hit=wt>=hb.goal*7;
+          else if(hb.type==="counter"){
+            const dir=hb.direction||"over";
+            const hasLog=viewDays.some(d=>(`${hb.id}:${d}`) in data.logs);
+            hit=dir==="under"?(hasLog&&wt<=hb.goal):wt>=hb.goal;
+          }
+          if(hit) hits++;
+        } else {
+          viewDays.forEach(ds=>{
+            if(ds>todayDs) return;
+            possible++;
+            if(getDayHit(hb,ds)) hits++;
+          });
+        }
+      });
+      return {hits, possible, pct:possible>0?Math.round(hits/possible*100):0};
+    };
+    const allScore = calcWeekScore();
+    const dailyHabits = data.habits.filter(h=>h.cycle==="daily");
+    const weeklyHabits = data.habits.filter(h=>h.cycle==="weekly");
+
+    const HabitRow = ({hb}) => {
+      const color=hb.color||C.pri;
+      const isWeekly=hb.cycle==="weekly";
+      if(isWeekly){
+        const wt=viewDays.reduce((s,d)=>s+gl(hb.id,d),0);
+        let intensity=0;
+        if(hb.type==="frequency") intensity=Math.min(wt/hb.goal,1);
+        else if(hb.type==="time") intensity=Math.min(wt/(hb.goal*7),1);
+        else if(hb.type==="counter"){
+          const dir=hb.direction||"over";
+          intensity=dir==="under"?(wt<=hb.goal?1:0.25):Math.min(wt/hb.goal,1);
+        }
+        const bg=intensity===0?C.pb:interpolate(intensity,color);
+        return (
+          <div style={{display:"flex",alignItems:"center",marginBottom:6}}>
+            <div style={{width:80,paddingRight:8,flexShrink:0}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{hb.name}</div>
+            </div>
+            <div style={{flex:1,height:CELL,borderRadius:8,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <span style={{fontSize:10,fontWeight:700,color:intensity>0.5?"rgba(255,255,255,0.9)":C.tm}}>
+                {intensity>=1?"✓ Done":`${Math.round(intensity*100)}%`}
+              </span>
+            </div>
+          </div>
+        );
+      }
+      return (
+        <div style={{display:"flex",alignItems:"center",marginBottom:6}}>
+          <div style={{width:80,paddingRight:8,flexShrink:0}}>
+            <div style={{fontSize:11,fontWeight:600,color:C.txt,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{hb.name}</div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:`repeat(7,1fr)`,gap:3,flex:1}}>
+            {viewDays.map(ds=>{
+              const isFuture=ds>todayDs;
+              const isToday=ds===todayDs;
+              const intensity=isFuture?0:getDayIntensity(hb,ds);
+              const bg=intensity===0?C.pb:interpolate(intensity,color);
+              return (
+                <div key={ds} style={{
+                  aspectRatio:"1",borderRadius:6,background:bg,
+                  border:isToday?`2px solid #1B1B18`:`2px solid transparent`,
+                  opacity:isFuture?0.4:1,
+                }}/>
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
+
+    return <div style={{padding:"0 16px"}}>
+
+      {/* ── Habit selector pills ── */}
+      <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:16,scrollbarWidth:"none"}}>
+        {data.habits.map(hb=>(
+          <button key={hb.id} onClick={()=>setSelHabit(hb)}
+            style={{padding:"7px 14px",borderRadius:99,border:`1.5px solid ${selHabit?.id===hb.id?hb.color||C.pri:C.cb}`,background:selHabit?.id===hb.id?(hb.color||C.pri)+"18":"transparent",color:selHabit?.id===hb.id?hb.color||C.pri:C.ts,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",whiteSpace:"nowrap",flexShrink:0}}>
+            {hb.name}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Stats row ── */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:16}}>
+        {[
+          {l:"This Month",v:`${pct}%`,sub:`${hitCount}/${monthPastDays.length} days`},
+          {l:"Streak",v:`${st}`,sub:h?.cycle==="daily"?"days":"weeks"},
+          {l:"Days Hit",v:`${hitCount}`,sub:"this month"},
+        ].map((x,i)=>(
+          <div key={i} style={{background:C.card,borderRadius:14,padding:"14px 12px",textAlign:"center",boxShadow:C.sh,border:`1px solid ${C.cb}`}}>
+            <div style={{fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:baseColor}}>{x.v}</div>
+            <div style={{fontSize:11,color:C.tm,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em",marginTop:2}}>{x.l}</div>
+            <div style={{fontSize:11,color:C.tm,marginTop:1}}>{x.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Month calendar heatmap ── */}
+      <div style={{background:C.card,borderRadius:16,padding:"16px",boxShadow:C.sh,border:`1px solid ${C.cb}`,marginBottom:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.txt}}>{monthName2}</div>
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <span style={{fontSize:10,color:C.tm}}>Less</span>
+            {[0,0.33,0.66,1].map(t=>(
+              <div key={t} style={{width:10,height:10,borderRadius:2,background:t===0?C.pb:interpolate(t,baseColor)}}/>
+            ))}
+            <span style={{fontSize:10,color:C.tm}}>More</span>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:6,gap:4}}>
+          {DAY_LABELS.map((d,i)=>(
+            <div key={i} style={{textAlign:"center",fontSize:10,fontWeight:600,color:C.tm}}>{d}</div>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4}}>
+          {Array.from({length:offset}).map((_,i)=>(<div key={`e${i}`} style={{aspectRatio:"1"}}/>))}
+          {monthDays.map(ds=>{
+            const isFuture=ds>todayDs;
+            const isToday=ds===todayDs;
+            const intensity=isFuture?0:getDayIntensity(h,ds);
+            const bg=intensity===0?C.pb:interpolate(intensity,baseColor);
+            const dayNum=new Date(ds+"T00:00:00").getDate();
+            return (
+              <div key={ds}>
+                <div style={{aspectRatio:"1",borderRadius:8,background:bg,border:isToday?`2px solid #1B1B18`:`2px solid transparent`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  <span style={{fontSize:9,fontWeight:isToday?700:500,color:intensity>0.5?"rgba(255,255,255,0.85)":C.tm,lineHeight:1}}>{dayNum}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Weekly Review ── */}
+      <div style={{fontSize:11,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10}}>Weekly Review</div>
+
+      {/* Week navigator */}
+      <div style={{background:C.card,borderRadius:16,padding:"14px 16px",boxShadow:C.sh,border:`1px solid ${C.cb}`,marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <button onClick={()=>setWeekOffset(w=>w-1)}
+            style={{width:36,height:36,borderRadius:10,border:`1.5px solid ${C.cb}`,background:C.bg,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <Ico t="back" sz={18} c={C.ts}/>
+          </button>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:14,fontWeight:700,color:C.txt}}>{isCurrentWeek?"This Week":wkLabel}</div>
+            {isCurrentWeek&&<div style={{fontSize:11,color:C.tm,marginTop:1}}>{wkLabel}</div>}
+          </div>
+          <button onClick={()=>setWeekOffset(w=>Math.min(w+1,0))} disabled={weekOffset===0}
+            style={{width:36,height:36,borderRadius:10,border:`1.5px solid ${C.cb}`,background:C.bg,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",opacity:weekOffset===0?0.3:1}}>
+            <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={C.ts} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+            </svg>
+          </button>
+        </div>
+        <div style={{marginTop:12,display:"flex",alignItems:"center",gap:10}}>
+          <div style={{height:6,flex:1,borderRadius:99,background:C.pb,overflow:"hidden"}}>
+            <div style={{height:"100%",borderRadius:99,width:`${allScore.pct}%`,background:C.pri,transition:"width .4s"}}/>
+          </div>
+          <div style={{fontSize:13,fontWeight:700,color:C.pri,minWidth:38,textAlign:"right"}}>{allScore.pct}%</div>
+        </div>
+        <div style={{fontSize:11,color:C.tm,textAlign:"center",marginTop:4}}>{allScore.hits} of {allScore.possible} habit-days completed</div>
+      </div>
+
+      {/* Habit grid */}
+      <div style={{background:C.card,borderRadius:16,padding:"16px",boxShadow:C.sh,border:`1px solid ${C.cb}`,marginBottom:24}}>
+        {/* Day headers */}
+        <div style={{display:"flex",alignItems:"center",marginBottom:10}}>
+          <div style={{width:80,flexShrink:0}}/>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,flex:1}}>
+            {viewDays.map((ds,i)=>{
+              const isToday=ds===todayDs;
+              return (
+                <div key={ds} style={{textAlign:"center"}}>
+                  <div style={{fontSize:9,fontWeight:600,color:isToday?C.pri:C.tm,textTransform:"uppercase"}}>{DAY_SHORT[i]}</div>
+                  <div style={{fontSize:11,fontWeight:isToday?700:500,color:isToday?C.pri:C.ts}}>{new Date(ds+"T00:00:00").getDate()}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {dailyHabits.length>0&&<>
+          <div style={{fontSize:10,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>Daily</div>
+          {dailyHabits.map(hb=><HabitRow key={hb.id} hb={hb}/>)}
+        </>}
+        {weeklyHabits.length>0&&<>
+          <div style={{fontSize:10,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.08em",marginTop:dailyHabits.length>0?14:0,marginBottom:8}}>Weekly</div>
+          {weeklyHabits.map(hb=><HabitRow key={hb.id} hb={hb}/>)}
+        </>}
+      </div>
+    </div>;
+  };
+
+  // ─── Add/Edit Form ───
   const FormView=({existing:ex})=>{
     const [nm,setNm]=useState(ex?.name||"");
     const [tp,setTp]=useState(ex?.type||"time");
@@ -249,8 +733,6 @@ function App() {
       <div style={{padding:"0 20px"}}>
         <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,marginBottom:24}}>{ex?"Edit Habit":"New Habit"}</div>
         <div style={{marginBottom:20}}><label style={lbl}>Habit Name</label><input style={ipt} placeholder="e.g. Study, Work Out, Read..." value={nm} onChange={e=>setNm(e.target.value)}/></div>
-
-        {/* ── Type selector ── */}
         <div style={{marginBottom:20}}><label style={lbl}>Type</label>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <button style={chip(tp==="time")} onClick={()=>setTp("time")}><span style={{display:"inline-flex",alignItems:"center",gap:4}}><Ico t="clock" sz={14} c={tp==="time"?C.pri:C.tm}/> Time-based</span></button>
@@ -258,38 +740,22 @@ function App() {
             <button style={chip(tp==="counter")} onClick={()=>setTp("counter")}><span style={{display:"inline-flex",alignItems:"center",gap:4}}><Ico t="arrowUp" sz={14} c={tp==="counter"?C.pri:C.tm}/> Counter Goal</span></button>
           </div>
         </div>
-
-        {/* ── Counter-specific direction selector ── */}
         {tp==="counter"&&<div style={{marginBottom:20}}>
           <label style={lbl}>Direction</label>
           <div style={{display:"flex",gap:8}}>
-            <button style={{...chip(dir==="over"),display:"inline-flex",alignItems:"center",gap:6}} onClick={()=>setDir("over")}>
-              <Ico t="arrowUp" sz={14} c={dir==="over"?C.pri:C.tm}/> Stay Over / At Least
-            </button>
-            <button style={{...chip(dir==="under"),display:"inline-flex",alignItems:"center",gap:6}} onClick={()=>setDir("under")}>
-              <Ico t="arrowDown" sz={14} c={dir==="under"?C.under:C.tm}/> Stay Under / At Most
-            </button>
+            <button style={{...chip(dir==="over"),display:"inline-flex",alignItems:"center",gap:6}} onClick={()=>setDir("over")}><Ico t="arrowUp" sz={14} c={dir==="over"?C.pri:C.tm}/> Stay Over / At Least</button>
+            <button style={{...chip(dir==="under"),display:"inline-flex",alignItems:"center",gap:6}} onClick={()=>setDir("under")}><Ico t="arrowDown" sz={14} c={dir==="under"?C.under:C.tm}/> Stay Under / At Most</button>
           </div>
-          <div style={{marginTop:8,fontSize:12,color:C.tm,lineHeight:1.5}}>
-            {dir==="over"
-              ? "✅ Goal is met when your count reaches or exceeds the target."
-              : "✅ Goal is met when your count stays at or below the target."}
-          </div>
+          <div style={{marginTop:8,fontSize:12,color:C.tm,lineHeight:1.5}}>{dir==="over"?"✅ Goal is met when your count reaches or exceeds the target.":"✅ Goal is met when your count stays at or below the target."}</div>
         </div>}
-
         <div style={{marginBottom:20}}><label style={lbl}>Cycle</label>
           <div style={{display:"flex",gap:8}}>
             <button style={chip(cy==="daily")} onClick={()=>setCy("daily")}>Daily</button>
             <button style={chip(cy==="weekly")} onClick={()=>setCy("weekly")}>Weekly</button>
           </div>
         </div>
-
         <div style={{marginBottom:20}}>
-          <label style={lbl}>
-            {tp==="time"?`Goal (per ${cy==="daily"?"day":"day, summed weekly"})`
-              :tp==="counter"?`Target number per ${cy==="weekly"?"week":"day"}`
-              :`Times per ${cy==="daily"?"day":"week"}`}
-          </label>
+          <label style={lbl}>{tp==="time"?`Goal (per ${cy==="daily"?"day":"day, summed weekly"})`:tp==="counter"?`Target number per ${cy==="weekly"?"week":"day"}`:`Times per ${cy==="daily"?"day":"week"}`}</label>
           {tp==="time"?<div style={{display:"flex",gap:8,alignItems:"center"}}>
             <input style={{...ipt,width:70,textAlign:"center"}} type="number" min="0" value={gH} onChange={e=>setGH(e.target.value)}/>
             <span style={{fontSize:14,color:C.ts,fontWeight:500}}>hours</span>
@@ -297,7 +763,6 @@ function App() {
             <span style={{fontSize:14,color:C.ts,fontWeight:500}}>min</span>
           </div>:<input style={{...ipt,width:80,textAlign:"center"}} type="number" min="1" value={gF} onChange={e=>setGF(e.target.value)}/>}
         </div>
-
         {tp==="time"&&<div style={{marginBottom:20}}>
           <label style={lbl}>Tap Increment</label>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{prs.map(p=><button key={p.v} style={chip(im===p.v)} onClick={()=>setIm(p.v)}>{p.l}</button>)}</div>
@@ -307,7 +772,6 @@ function App() {
             <span style={{fontSize:13,color:C.tm}}>minutes</span>
           </div>
         </div>}
-
         <div style={{marginBottom:28}}><label style={lbl}>Color</label>
           <div style={{display:"flex",gap:8}}>{cols.map(c=><button key={c} onClick={()=>setCl(c)} style={{width:32,height:32,borderRadius:10,background:c,border:cl===c?"3px solid "+C.txt:"3px solid transparent",cursor:"pointer"}}/>)}</div>
         </div>
@@ -317,45 +781,30 @@ function App() {
     </>;
   };
 
-  // ─── Stats ───
+  // ─── Stats view ───
   const Stats=({habit:h})=>{
     const isT=h.type==="time",isCnt=h.type==="counter",st=streak(h);
     const dir=h.direction||"over";
     const isWeeklyCnt=isCnt&&h.cycle==="weekly";
-    const barColor = isCnt ? (dir==="under" ? C.under : h.color||C.pri) : h.color||C.pri;
+    const barColor = h.color||C.pri;
     const tv=gl(h.id,ts),wt=wd.reduce((s,d)=>s+gl(h.id,d),0);
-    // For weekly counter, "hit" is assessed on the whole week total
     const weekHit = isCnt ? (dir==="under" ? wt>0 && wt<=h.goal : wt>=h.goal) : false;
     const wbd=wd.map(d=>{
       const v=gl(h.id,d);
-      const hit=isT?v>=h.goal
-        :isCnt?(isWeeklyCnt?weekHit:(dir==="under"?v<=h.goal:v>=h.goal))
-        :v>=(h.cycle==="daily"?h.goal:1);
+      const hit=isT?v>=h.goal:isCnt?(isWeeklyCnt?weekHit:(dir==="under"?v<=h.goal:v>=h.goal)):v>=(h.cycle==="daily"?h.goal:1);
       return{day:dayLbl(d),value:v,goal:isWeeklyCnt?Math.round(h.goal/7*10)/10:h.goal,hit};
     });
     const wks=weeksBack(8);
     const td=wks.map(ws=>{
       const ds=weekDaysOf(ws);const tot=ds.reduce((s,d)=>s+gl(h.id,d),0);
       const dt=new Date(ws+"T00:00:00");
-      const weekGoal=isT?Math.round(h.goal*7/60*10)/10
-        :isCnt?h.goal
-        :(h.cycle==="weekly"?h.goal:h.goal*7);
+      const weekGoal=isT?Math.round(h.goal*7/60*10)/10:isCnt?h.goal:(h.cycle==="weekly"?h.goal:h.goal*7);
       return{week:`${dt.getDate()}/${dt.getMonth()+1}`,total:isT?Math.round(tot/60*10)/10:tot,weekGoal};
     });
     const ttStyle={borderRadius:10,border:`1px solid ${C.cb}`,boxShadow:C.sh,fontFamily:"'DM Sans',sans-serif",fontSize:13};
-
-    const goalDesc = isT
-      ? `${ft(h.goal)} per ${h.cycle==="daily"?"day":"week"}`
-      : isCnt
-        ? `${dir==="under"?"At most":"At least"} ${h.goal} per ${h.cycle==="weekly"?"week":"day"}`
-        : `${h.goal}× per ${h.cycle==="daily"?"day":"week"}`;
-
-    // "Today" stat tile: for weekly counter show week total instead of today
-    const todayVal = isCnt
-      ? (isWeeklyCnt ? `${wt}` : `${tv}`)
-      : isT ? ft(tv) : `${tv}×`;
-    const todayLbl = isWeeklyCnt ? "This Week" : "Today";
-
+    const goalDesc=isT?`${ft(h.goal)} per ${h.cycle==="daily"?"day":"week"}`:isCnt?`${dir==="under"?"At most":"At least"} ${h.goal} per ${h.cycle==="weekly"?"week":"day"}`:`${h.goal}× per ${h.cycle==="daily"?"day":"week"}`;
+    const todayVal=isCnt?(isWeeklyCnt?`${wt}`:`${tv}`):isT?ft(tv):`${tv}×`;
+    const todayLbl=isWeeklyCnt?"This Week":"Today";
     return <>
       <div style={{padding:"24px 20px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <button style={{...bGh,padding:"8px 0"}} onClick={()=>{setView("home");setSelH(null);}}><Ico t="back" sz={20} c={C.txt}/><span style={{marginLeft:4,color:C.txt,fontWeight:600}}>Back</span></button>
@@ -384,8 +833,6 @@ function App() {
             </div>
           )}
         </div>
-
-        {/* Weekly bar chart */}
         <div style={{...crd,margin:"0 0 16px"}}>
           <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>This Week</div>
           <ResponsiveContainer width="100%" height={180}>
@@ -394,7 +841,6 @@ function App() {
               <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fill:C.tm,fontSize:12,fontWeight:500}}/>
               <YAxis hide/>
               <Tooltip contentStyle={ttStyle} formatter={(v,n)=>n==="goal"?(isCnt?`${v} target`:(isT?ft(v):`${v}× goal`)):(isCnt?`${v}`:(isT?ft(v):`${v}×`))}/>
-              {/* Reference line for counter goal */}
               {isCnt&&<ReferenceLine y={h.goal} stroke={barColor} strokeDasharray="6 3" strokeWidth={1.5}/>}
               {(!isCnt)&&(isT||h.cycle==="daily")&&<Bar dataKey="goal" radius={[6,6,6,6]} fill={C.pb}/>}
               <Bar dataKey="value" radius={[6,6,6,6]}>
@@ -403,8 +849,6 @@ function App() {
             </BarChart>
           </ResponsiveContainer>
         </div>
-
-        {/* 8 week trend */}
         <div style={{...crd,margin:"0 0 16px"}}>
           <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>{isT?"Weekly Hours":isCnt?(isWeeklyCnt?"Weekly Totals — 8 Weeks":"Daily Counts — 8 Weeks"):"Weekly Completions"} — 8 Week Trend</div>
           <ResponsiveContainer width="100%" height={180}>
@@ -422,35 +866,70 @@ function App() {
     </>;
   };
 
-  // ─── Home ───
+  // ─── Bottom Nav ───
+  const isSubView = view==="add"||view==="edit"||view==="stats";
+  const NavBar = () => (
+    <nav className="bottom-nav">
+      <button className={`nav-btn ${tab==="today"&&!isSubView?"active":""}`} onClick={()=>{setTab("today");if(isSubView)setView("home");}}>
+        <Ico t="home" sz={22} c={tab==="today"&&!isSubView?C.pri:C.tm}/>
+        Today
+      </button>
+      <button className={`nav-btn ${tab==="heatmap"&&!isSubView?"active":""}`} onClick={()=>{setTab("heatmap");if(isSubView)setView("home");}}>
+        <Ico t="grid" sz={22} c={tab==="heatmap"&&!isSubView?C.pri:C.tm}/>
+        Heatmap
+      </button>
+    </nav>
+  );
+
+  // ─── Render ───
   const dh=data.habits.filter(h=>h.cycle==="daily");
   const wh=data.habits.filter(h=>h.cycle==="weekly");
   const ds=new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
 
-  return <div style={{fontFamily:"'DM Sans',-apple-system,sans-serif",background:C.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto",color:C.txt,paddingBottom:32}}>
-    {view==="home"&&<>
-      <div style={{padding:"24px 20px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <div>
-          <div style={{fontSize:13,color:C.tm,fontWeight:500,letterSpacing:"0.04em",textTransform:"uppercase"}}>{ds}</div>
-          <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-0.02em"}}>Your Habits</div>
+  return <div style={{fontFamily:"'DM Sans',-apple-system,sans-serif",background:C.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto",color:C.txt}}>
+
+    {/* ── Sub-views (no bottom nav scroll area) ── */}
+    {view==="add"&&<div className="scroll-area"><FormView existing={null}/></div>}
+    {view==="edit"&&edH&&<div className="scroll-area"><FormView existing={edH}/></div>}
+    {view==="stats"&&selH&&<div className="scroll-area"><Stats habit={selH}/></div>}
+
+    {/* ── Main tabs ── */}
+    {!isSubView&&<>
+      {tab==="today"&&<div className="scroll-area">
+        <div style={{padding:"24px 20px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontSize:13,color:C.tm,fontWeight:500,letterSpacing:"0.04em",textTransform:"uppercase"}}>{ds}</div>
+            <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-0.02em"}}>Your Habits</div>
+          </div>
+          <button style={{...tBtn,background:C.pri,color:"#fff",boxShadow:C.shL}} onClick={()=>setView("add")}><Ico t="plus" sz={22} c="#fff"/></button>
         </div>
-        <button style={{...tBtn,background:C.pri,color:"#fff",boxShadow:C.shL}} onClick={()=>setView("add")}><Ico t="plus" sz={22} c="#fff"/></button>
-      </div>
-      {data.habits.length===0?
-        <div style={{textAlign:"center",padding:"60px 40px",color:C.tm}}>
-          <div style={{fontSize:48,marginBottom:16}}>🎯</div>
-          <div style={{fontSize:17,fontWeight:600,color:C.txt,marginBottom:8}}>No habits yet</div>
-          <div style={{fontSize:14,lineHeight:1.5}}>Tap the + button to create your first habit and start tracking your progress.</div>
+        {data.habits.length===0?
+          <div style={{textAlign:"center",padding:"60px 40px",color:C.tm}}>
+            <div style={{fontSize:48,marginBottom:16}}>🎯</div>
+            <div style={{fontSize:17,fontWeight:600,color:C.txt,marginBottom:8}}>No habits yet</div>
+            <div style={{fontSize:14,lineHeight:1.5}}>Tap the + button to create your first habit and start tracking your progress.</div>
+          </div>
+        :<>
+          {dh.length>0&&<><div style={{fontSize:11,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.1em",padding:"16px 20px 8px"}}>Daily</div>{dh.map(card)}</>}
+          {dh.length>0&&wh.length>0&&<div style={{height:1,background:C.cb,margin:"8px 20px 0"}}/>}
+          {wh.length>0&&<><div style={{fontSize:11,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.1em",padding:"16px 20px 8px"}}>Weekly</div>{wh.map(card)}</>}
+        </>}
+      </div>}
+
+      {tab==="heatmap"&&<div className="scroll-area">
+        <div style={{padding:"24px 20px 20px"}}>
+          <div style={{fontSize:13,color:C.tm,fontWeight:500,letterSpacing:"0.04em",textTransform:"uppercase",marginBottom:4}}>Overview</div>
+          <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-0.02em",marginBottom:20}}>Weekly Review</div>
+          <HeatmapTab/>
         </div>
-      :<>
-        {dh.length>0&&<><div style={{fontSize:11,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.1em",padding:"16px 20px 8px"}}>Daily</div>{dh.map(card)}</>}
-        {dh.length>0&&wh.length>0&&<div style={{height:1,background:C.cb,margin:"8px 20px 0"}}/>}
-        {wh.length>0&&<><div style={{fontSize:11,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.1em",padding:"16px 20px 8px"}}>Weekly</div>{wh.map(card)}</>}
-      </>}
+      </div>}
     </>}
-    {view==="add"&&<FormView existing={null}/>}
-    {view==="edit"&&edH&&<FormView existing={edH}/>}
-    {view==="stats"&&selH&&<Stats habit={selH}/>}
+
+    {confetti && <Confetti key={confetti.key} x={confetti.x} y={confetti.y} color={confetti.color}/>}
+    <NavBar/>
+
+    {/* Past-day log modal */}
+    {pastLogModal&&<PastLogModal habit={pastLogModal} onClose={()=>setPastLogModal(null)}/>}
   </div>;
 }
 

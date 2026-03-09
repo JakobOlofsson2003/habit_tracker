@@ -109,7 +109,7 @@ function App() {
     const tv=gl(h.id,ts),wt=wd.reduce((s,d)=>s+gl(h.id,d),0),isT=h.type==="time";
     let p,gd,cur;
     if(isT){if(h.cycle==="daily"){p=tv/h.goal;cur=ft(tv);gd=ft(h.goal);}else{p=wt/(h.goal*7);cur=ft(wt);gd=ft(h.goal*7)+"/wk";}}
-    else{if(h.cycle==="weekly"){p=wt/h.goal;cur=`${wt}`;gd=`${h.goal}×/wk`;}else{p=tv/h.goal;cur=`${tv}`;gd=`${h.goal}×/day`;}}
+    else{if(h.cycle==="weekly"){p=wt/h.goal;cur=`${wt}`;gd=`${h.goal}wk`;}else{p=tv/h.goal;cur=`${tv}`;gd=`${h.goal}×/day`;}}
     return{p,cur,gd,tv,wt,isT};
   };
 

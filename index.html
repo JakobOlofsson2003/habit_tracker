@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#F7F5F0">
+<title>Habits</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{background:#F7F5F0;font-family:'DM Sans',-apple-system,sans-serif;color:#1B1B18;overflow-x:hidden}
+  html{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  #loading{display:flex;align-items:center;justify-content:center;height:100vh;font-family:'DM Sans',sans-serif;color:#A3A394;font-size:15px}
+</style>
+</head>
+<body>
+<div id="root"><div id="loading">Loading...</div></div>
+
+<!-- React + deps from unpkg (official recommended approach) -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-is@18/umd/react-is.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/prop-types/prop-types.min.js" crossorigin></script>
+<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+
+<script type="text/babel" data-type="module">
+const {useState, useEffect, useCallback, useMemo} = React;
+const {BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell} = Recharts;
+
+// ─── Storage ───
+const SK = "habitTracker_v1";
+const load = () => { try { return JSON.parse(localStorage.getItem(SK)) || {habits:[],logs:{}}; } catch { return {habits:[],logs:{}}; } };
+const persist = (d) => localStorage.setItem(SK, JSON.stringify(d));
+
+// ─── Dates (all local time) ───
+const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const today = () => fmt(new Date());
+const weekStart = (ds) => { const d=new Date(ds+"T00:00:00"); const dy=d.getDay(); d.setDate(d.getDate()-(dy===0?6:dy-1)); return fmt(d); };
+const daysInRange = (a,b) => { const r=[],d=new Date(a+"T00:00:00"),e=new Date(b+"T00:00:00"); while(d<=e){r.push(fmt(d));d.setDate(d.getDate()+1);} return r; };
+const weekDaysOf = (ds) => { const ws=weekStart(ds); const ed=new Date(ws+"T00:00:00"); ed.setDate(ed.getDate()+6); return daysInRange(ws,fmt(ed)); };
+const dayLbl = (ds) => ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][(()=>{const dy=new Date(ds+"T00:00:00").getDay(); return dy===0?6:dy-1;})()];
+const weeksBack = (n) => { const w=[],d=new Date(); for(let i=n-1;i>=0;i--){const x=new Date(d);x.setDate(x.getDate()-i*7);w.push(weekStart(fmt(x)));} return [...new Set(w)].slice(-n); };
+
+// ─── Theme ───
+const C = {
+  bg:"#F7F5F0",card:"#FFF",cb:"#E8E4DC",pri:"#2D6A4F",pg:"#D8F3DC",
+  acc:"#E76F51",txt:"#1B1B18",ts:"#6B6B60",tm:"#A3A394",ok:"#40916C",pb:"#EDEBE5",
+  sh:"0 1px 3px rgba(27,27,24,.06),0 1px 2px rgba(27,27,24,.04)",
+  shL:"0 4px 12px rgba(27,27,24,.08),0 2px 4px rgba(27,27,24,.04)",
+};
+
+// ─── Icons ───
+const Ico = ({t,sz=20,c=C.ts}) => {
+  const s={width:sz,height:sz,display:"inline-block"};
+  const m={
+    plus:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+    chart:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
+    back:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>,
+    fire:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12c2-2.96 0-7-1-8 0 3.038-1.773 4.741-3 6-1.226 1.26-2 3.24-2 5a6 6 0 1 0 12 0c0-1.532-1.056-3.94-2-5-1.786 3-2.791 3-4 2z"/></svg>,
+    trash:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
+    edit:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+    minus:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+    clock:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+    target:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,
+  };
+  return m[t]||null;
+};
+
+const PBar = ({val,max,color=C.pri}) => {
+  const pct=Math.min((val/max)*100,100);
+  return <div style={{width:"100%",height:8,borderRadius:99,background:C.pb,overflow:"hidden"}}>
+    <div style={{height:"100%",borderRadius:99,width:`${pct}%`,background:pct>=100?C.ok:color,transition:"width .4s cubic-bezier(.34,1.56,.64,1)"}}/>
+  </div>;
+};
+
+// ─── App ───
+function App() {
+  const [data,setData]=useState(load);
+  const [view,setView]=useState("home");
+  const [selH,setSelH]=useState(null);
+  const [edH,setEdH]=useState(null);
+
+  useEffect(()=>{persist(data);},[data]);
+
+  const ts=today();
+  const wd=useMemo(()=>weekDaysOf(ts),[ts]);
+  const gl=useCallback((id,d)=>data.logs[`${id}:${d}`]||0,[data.logs]);
+
+  const addH=useCallback(h=>setData(p=>({...p,habits:[...p.habits,{...h,id:Date.now().toString()}]})),[]);
+  const updH=useCallback((id,u)=>setData(p=>({...p,habits:p.habits.map(h=>h.id===id?{...h,...u}:h)})),[]);
+  const delH=useCallback(id=>setData(p=>({...p,habits:p.habits.filter(h=>h.id!==id),logs:Object.fromEntries(Object.entries(p.logs).filter(([k])=>!k.startsWith(id+":")))})),[]);
+
+  const streak=useCallback(h=>{
+    let s=0;
+    if(h.cycle==="daily"){const d=new Date();for(let i=0;i<365;i++){const v=gl(h.id,fmt(d));if(h.type==="time"?v>=h.goal:v>=h.goal)s++;else if(i>0)break;d.setDate(d.getDate()-1);}}
+    else{const w=new Date(weekStart(today())+"T00:00:00");for(let i=0;i<52;i++){const ds=weekDaysOf(fmt(w));const tot=ds.reduce((a,d)=>a+gl(h.id,d),0);if(h.type==="time"?tot>=h.goal*7:tot>=h.goal)s++;else if(i>0)break;w.setDate(w.getDate()-7);}}
+    return s;
+  },[gl]);
+
+  const ft=m=>{if(m<60)return`${m}m`;const h=Math.floor(m/60),r=m%60;return r>0?`${h}h ${r}m`:`${h}h`;};
+  const fi=m=>{if(m<60)return`${m}m`;if(m%60===0)return`${m/60}h`;return`${Math.floor(m/60)}h${m%60}m`;};
+
+  const prog=h=>{
+    const tv=gl(h.id,ts),wt=wd.reduce((s,d)=>s+gl(h.id,d),0),isT=h.type==="time";
+    let p,gd,cur;
+    if(isT){if(h.cycle==="daily"){p=tv/h.goal;cur=ft(tv);gd=ft(h.goal);}else{p=wt/(h.goal*7);cur=ft(wt);gd=ft(h.goal*7)+"/wk";}}
+    else{if(h.cycle==="weekly"){p=wt/h.goal;cur=`${wt}`;gd=`${h.goal}×/wk`;}else{p=tv/h.goal;cur=`${tv}`;gd=`${h.goal}×/day`;}}
+    return{p,cur,gd,tv,wt,isT};
+  };
+
+  const doAdd=useCallback((id,isT,inc)=>setData(p=>{const k=`${id}:${ts}`,c=p.logs[k]||0;return{...p,logs:{...p.logs,[k]:c+(isT?inc:1)}};}),[ts]);
+  const doSub=useCallback((id,isT,inc)=>setData(p=>{const k=`${id}:${ts}`,c=p.logs[k]||0;return{...p,logs:{...p.logs,[k]:Math.max(0,c-(isT?inc:1))}};}),[ts]);
+
+  // ─── Shared styles ───
+  const bGh={background:"transparent",color:C.ts,padding:"8px 12px",fontSize:14,border:"none",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600,display:"inline-flex",alignItems:"center",gap:4};
+  const tBtn={width:52,height:52,borderRadius:14,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:18,transition:"all .15s"};
+  const crd={background:C.card,borderRadius:16,padding:"18px 20px",margin:"0 16px 12px",boxShadow:C.sh,border:`1px solid ${C.cb}`};
+  const ipt={width:"100%",padding:"12px 16px",borderRadius:12,border:`1.5px solid ${C.cb}`,fontFamily:"'DM Sans',sans-serif",fontSize:15,color:C.txt,background:C.bg,outline:"none",boxSizing:"border-box"};
+  const chip=a=>({padding:"8px 16px",borderRadius:99,border:`1.5px solid ${a?C.pri:C.cb}`,background:a?C.pg:"transparent",color:a?C.pri:C.ts,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"});
+  const lbl={fontSize:12,fontWeight:600,color:C.ts,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6,display:"block"};
+
+  // ─── Card renderer ───
+  const card=h=>{
+    const{p:pr,cur,gd,isT}=prog(h);
+    const inc=h.increment||60,done=pr>=1,st=streak(h);
+    return <div key={h.id} style={{...crd,borderLeft:`4px solid ${done?C.ok:h.color||C.pri}`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+        <div style={{flex:1}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+            <span style={{fontSize:16,fontWeight:700}}>{h.name}</span>
+            {done&&<span style={{fontSize:12,background:C.pg,color:C.ok,padding:"2px 8px",borderRadius:99,fontWeight:700}}>✓</span>}
+          </div>
+          <div style={{fontSize:13,color:C.tm}}>
+            {isT?cur:`${cur}×`} / {gd}
+            {st>0&&<span style={{marginLeft:10,color:C.acc}}>🔥 {st} {h.cycle==="daily"?"day":"week"} streak</span>}
+          </div>
+        </div>
+        <button style={{...bGh,padding:"6px 8px"}} onClick={()=>{setSelH(h);setView("stats");}}><Ico t="chart" sz={18} c={C.tm}/></button>
+      </div>
+      <PBar val={Math.min(pr,1)} max={1} color={h.color||C.pri}/>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginTop:14}}>
+        <button style={{...tBtn,background:C.bg,border:`1.5px solid ${C.cb}`}} onClick={()=>doSub(h.id,isT,inc)}><Ico t="minus" sz={18} c={C.ts}/></button>
+        <button style={{...tBtn,flex:1,borderRadius:14,background:done?C.pg:C.pri,color:done?C.pri:"#fff",fontSize:15,fontWeight:700,height:48}} onClick={()=>doAdd(h.id,isT,inc)}>
+          {isT?`+ ${fi(inc)}`:"+\u00a01"}
+        </button>
+      </div>
+    </div>;
+  };
+
+  // ─── Add/Edit ───
+  const FormView=({existing:ex})=>{
+    const [nm,setNm]=useState(ex?.name||"");
+    const [tp,setTp]=useState(ex?.type||"time");
+    const [cy,setCy]=useState(ex?.cycle||"daily");
+    const [gH,setGH]=useState(ex&&ex.type==="time"?String(Math.floor(ex.goal/60)):"1");
+    const [gM,setGM]=useState(ex&&ex.type==="time"?String(ex.goal%60):"0");
+    const [gF,setGF]=useState(ex&&ex.type==="frequency"?String(ex.goal):"3");
+    const [im,setIm]=useState(ex?.increment?String(ex.increment):"60");
+    const [cl,setCl]=useState(ex?.color||C.pri);
+    const cols=["#2D6A4F","#264653","#E76F51","#E9C46A","#6A4C93","#1982C4","#F77F00","#8338EC"];
+    const prs=[{l:"5m",v:"5"},{l:"15m",v:"15"},{l:"30m",v:"30"},{l:"1h",v:"60"}];
+    const sv=()=>{
+      if(!nm.trim())return;
+      const g=tp==="time"?(parseInt(gH||0)*60+parseInt(gM||0)):parseInt(gF||1);
+      const h={name:nm.trim(),type:tp,cycle:cy,goal:Math.max(1,g),increment:tp==="time"?Math.max(1,parseInt(im||60)):undefined,color:cl};
+      if(ex)updH(ex.id,h);else addH(h);
+      setView("home");setEdH(null);
+    };
+    return <>
+      <div style={{padding:"24px 20px 16px",display:"flex",alignItems:"center"}}>
+        <button style={{...bGh,padding:"8px 0"}} onClick={()=>{setView(ex?"stats":"home");setEdH(null);}}><Ico t="back" sz={20} c={C.txt}/><span style={{marginLeft:4,color:C.txt,fontWeight:600}}>Back</span></button>
+      </div>
+      <div style={{padding:"0 20px"}}>
+        <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,marginBottom:24}}>{ex?"Edit Habit":"New Habit"}</div>
+        <div style={{marginBottom:20}}><label style={lbl}>Habit Name</label><input style={ipt} placeholder="e.g. Study, Work Out, Read..." value={nm} onChange={e=>setNm(e.target.value)}/></div>
+        <div style={{marginBottom:20}}><label style={lbl}>Type</label>
+          <div style={{display:"flex",gap:8}}>
+            <button style={chip(tp==="time")} onClick={()=>setTp("time")}><span style={{display:"inline-flex",alignItems:"center",gap:4}}><Ico t="clock" sz={14} c={tp==="time"?C.pri:C.tm}/> Time-based</span></button>
+            <button style={chip(tp==="frequency")} onClick={()=>setTp("frequency")}><span style={{display:"inline-flex",alignItems:"center",gap:4}}><Ico t="target" sz={14} c={tp==="frequency"?C.pri:C.tm}/> Frequency</span></button>
+          </div>
+        </div>
+        <div style={{marginBottom:20}}><label style={lbl}>Cycle</label>
+          <div style={{display:"flex",gap:8}}>
+            <button style={chip(cy==="daily")} onClick={()=>setCy("daily")}>Daily</button>
+            <button style={chip(cy==="weekly")} onClick={()=>setCy("weekly")}>Weekly</button>
+          </div>
+        </div>
+        <div style={{marginBottom:20}}>
+          <label style={lbl}>{tp==="time"?`Goal (per ${cy==="daily"?"day":"day, summed weekly"})`:`Times per ${cy==="daily"?"day":"week"}`}</label>
+          {tp==="time"?<div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <input style={{...ipt,width:70,textAlign:"center"}} type="number" min="0" value={gH} onChange={e=>setGH(e.target.value)}/>
+            <span style={{fontSize:14,color:C.ts,fontWeight:500}}>hours</span>
+            <input style={{...ipt,width:70,textAlign:"center"}} type="number" min="0" max="59" value={gM} onChange={e=>setGM(e.target.value)}/>
+            <span style={{fontSize:14,color:C.ts,fontWeight:500}}>min</span>
+          </div>:<input style={{...ipt,width:80,textAlign:"center"}} type="number" min="1" value={gF} onChange={e=>setGF(e.target.value)}/>}
+        </div>
+        {tp==="time"&&<div style={{marginBottom:20}}>
+          <label style={lbl}>Tap Increment</label>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{prs.map(p=><button key={p.v} style={chip(im===p.v)} onClick={()=>setIm(p.v)}>{p.l}</button>)}</div>
+          <div style={{marginTop:10,display:"flex",gap:8,alignItems:"center"}}>
+            <span style={{fontSize:13,color:C.tm}}>Custom:</span>
+            <input style={{...ipt,width:70,textAlign:"center"}} type="number" min="1" value={im} onChange={e=>setIm(e.target.value)}/>
+            <span style={{fontSize:13,color:C.tm}}>minutes</span>
+          </div>
+        </div>}
+        <div style={{marginBottom:28}}><label style={lbl}>Color</label>
+          <div style={{display:"flex",gap:8}}>{cols.map(c=><button key={c} onClick={()=>setCl(c)} style={{width:32,height:32,borderRadius:10,background:c,border:cl===c?"3px solid "+C.txt:"3px solid transparent",cursor:"pointer"}}/>)}</div>
+        </div>
+        <button style={{border:"none",borderRadius:12,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600,background:C.pri,color:"#fff",padding:"14px 24px",fontSize:15,width:"100%",display:"flex",alignItems:"center",justifyContent:"center"}} onClick={sv}>{ex?"Save Changes":"Create Habit"}</button>
+        {ex&&<button style={{...bGh,width:"100%",marginTop:12,color:C.acc,justifyContent:"center"}} onClick={()=>{delH(ex.id);setView("home");setEdH(null);}}><Ico t="trash" sz={16} c={C.acc}/> Delete Habit</button>}
+      </div>
+    </>;
+  };
+
+  // ─── Stats ───
+  const Stats=({habit:h})=>{
+    const isT=h.type==="time",st=streak(h);
+    const wbd=wd.map(d=>{const v=gl(h.id,d);return{day:dayLbl(d),value:v,goal:isT?h.goal:(h.cycle==="daily"?h.goal:undefined),hit:isT?v>=h.goal:v>=(h.cycle==="daily"?h.goal:1)};});
+    const wks=weeksBack(8);
+    const td=wks.map(ws=>{const ds=weekDaysOf(ws);const tot=ds.reduce((s,d)=>s+gl(h.id,d),0);const dt=new Date(ws+"T00:00:00");return{week:`${dt.getDate()}/${dt.getMonth()+1}`,total:isT?Math.round(tot/60*10)/10:tot,weekGoal:isT?Math.round(h.goal*7/60*10)/10:(h.cycle==="weekly"?h.goal:h.goal*7)};});
+    const tv=gl(h.id,ts),wt=wd.reduce((s,d)=>s+gl(h.id,d),0);
+    const ttStyle={borderRadius:10,border:`1px solid ${C.cb}`,boxShadow:C.sh,fontFamily:"'DM Sans',sans-serif",fontSize:13};
+    return <>
+      <div style={{padding:"24px 20px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <button style={{...bGh,padding:"8px 0"}} onClick={()=>{setView("home");setSelH(null);}}><Ico t="back" sz={20} c={C.txt}/><span style={{marginLeft:4,color:C.txt,fontWeight:600}}>Back</span></button>
+        <button style={bGh} onClick={()=>{setEdH(h);setView("edit");}}><Ico t="edit" sz={18} c={C.ts}/></button>
+      </div>
+      <div style={{padding:"0 20px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
+          <div style={{width:6,height:36,borderRadius:99,background:h.color||C.pri}}/>
+          <div>
+            <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400}}>{h.name}</div>
+            <div style={{fontSize:13,color:C.tm}}>{isT?`${ft(h.goal)} per ${h.cycle==="daily"?"day":"week"}`:`${h.goal}× per ${h.cycle==="daily"?"day":"week"}`}</div>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:24}}>
+          {[{l:"Today",v:isT?ft(tv):`${tv}×`,i:"clock"},{l:"This Week",v:isT?ft(wt):`${wt}×`,i:"chart"},{l:"Streak",v:`${st} ${h.cycle==="daily"?"d":"w"}`,i:"fire"}].map((x,i)=>
+            <div key={i} style={{background:C.card,borderRadius:14,padding:"14px 12px",textAlign:"center",boxShadow:C.sh,border:`1px solid ${C.cb}`}}>
+              <div style={{marginBottom:6}}><Ico t={x.i} sz={18} c={h.color||C.pri}/></div>
+              <div style={{fontSize:20,fontWeight:700,fontFamily:"'DM Serif Display',serif"}}>{x.v}</div>
+              <div style={{fontSize:11,color:C.tm,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em",marginTop:2}}>{x.l}</div>
+            </div>
+          )}
+        </div>
+        <div style={{...crd,margin:"0 0 16px"}}>
+          <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>This Week</div>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={wbd} barCategoryGap="20%">
+              <CartesianGrid strokeDasharray="3 3" stroke={C.cb} vertical={false}/>
+              <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fill:C.tm,fontSize:12,fontWeight:500}}/>
+              <YAxis hide/>
+              <Tooltip contentStyle={ttStyle} formatter={(v,n)=>n==="goal"?(isT?ft(v):`${v}× goal`):(isT?ft(v):`${v}×`)}/>
+              {(isT||h.cycle==="daily")&&<Bar dataKey="goal" radius={[6,6,6,6]} fill={C.pb}/>}
+              <Bar dataKey="value" radius={[6,6,6,6]}>{wbd.map((e,i)=><Cell key={i} fill={e.hit?(h.color||C.pri):C.tm+"40"}/>)}</Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div style={{...crd,margin:"0 0 16px"}}>
+          <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>{isT?"Weekly Hours":"Weekly Completions"} — 8 Week Trend</div>
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={td}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.cb} vertical={false}/>
+              <XAxis dataKey="week" axisLine={false} tickLine={false} tick={{fill:C.tm,fontSize:11,fontWeight:500}}/>
+              <YAxis hide/>
+              <Tooltip contentStyle={ttStyle} formatter={(v,n)=>n==="total"?(isT?`${v}h`:`${v}×`):(isT?`${v}h goal`:`${v}× goal`)}/>
+              <Line type="monotone" dataKey="weekGoal" stroke={C.tm} strokeDasharray="6 3" strokeWidth={1.5} dot={false}/>
+              <Line type="monotone" dataKey="total" stroke={h.color||C.pri} strokeWidth={2.5} dot={{r:4,fill:h.color||C.pri,strokeWidth:0}} activeDot={{r:6}}/>
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </>;
+  };
+
+  // ─── Home ───
+  const dh=data.habits.filter(h=>h.cycle==="daily");
+  const wh=data.habits.filter(h=>h.cycle==="weekly");
+  const ds=new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
+
+  return <div style={{fontFamily:"'DM Sans',-apple-system,sans-serif",background:C.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto",color:C.txt,paddingBottom:32}}>
+    {view==="home"&&<>
+      <div style={{padding:"24px 20px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div>
+          <div style={{fontSize:13,color:C.tm,fontWeight:500,letterSpacing:"0.04em",textTransform:"uppercase"}}>{ds}</div>
+          <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,letterSpacing:"-0.02em"}}>Your Habits</div>
+        </div>
+        <button style={{...tBtn,background:C.pri,color:"#fff",boxShadow:C.shL}} onClick={()=>setView("add")}><Ico t="plus" sz={22} c="#fff"/></button>
+      </div>
+      {data.habits.length===0?
+        <div style={{textAlign:"center",padding:"60px 40px",color:C.tm}}>
+          <div style={{fontSize:48,marginBottom:16}}>🎯</div>
+          <div style={{fontSize:17,fontWeight:600,color:C.txt,marginBottom:8}}>No habits yet</div>
+          <div style={{fontSize:14,lineHeight:1.5}}>Tap the + button to create your first habit and start tracking your progress.</div>
+        </div>
+      :<>
+        {dh.length>0&&<><div style={{fontSize:11,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.1em",padding:"16px 20px 8px"}}>Daily</div>{dh.map(card)}</>}
+        {dh.length>0&&wh.length>0&&<div style={{height:1,background:C.cb,margin:"8px 20px 0"}}/>}
+        {wh.length>0&&<><div style={{fontSize:11,fontWeight:700,color:C.tm,textTransform:"uppercase",letterSpacing:"0.1em",padding:"16px 20px 8px"}}>Weekly</div>{wh.map(card)}</>}
+      </>}
+    </>}
+    {view==="add"&&<FormView existing={null}/>}
+    {view==="edit"&&edH&&<FormView existing={edH}/>}
+    {view==="stats"&&selH&&<Stats habit={selH}/>}
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>

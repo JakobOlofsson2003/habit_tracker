@@ -20,7 +20,6 @@
 <body>
 <div id="root"><div id="loading">Loading...</div></div>
 
-<!-- React + deps from unpkg (official recommended approach) -->
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-is@18/umd/react-is.production.min.js" crossorigin></script>
@@ -30,7 +29,7 @@
 
 <script type="text/babel" data-type="module">
 const {useState, useEffect, useCallback, useMemo} = React;
-const {BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell} = Recharts;
+const {BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine} = Recharts;
 
 // ─── Storage ───
 const SK = "habitTracker_v1";
@@ -50,6 +49,7 @@ const weeksBack = (n) => { const w=[],d=new Date(); for(let i=n-1;i>=0;i--){cons
 const C = {
   bg:"#F7F5F0",card:"#FFF",cb:"#E8E4DC",pri:"#2D6A4F",pg:"#D8F3DC",
   acc:"#E76F51",txt:"#1B1B18",ts:"#6B6B60",tm:"#A3A394",ok:"#40916C",pb:"#EDEBE5",
+  over:"#2D6A4F", under:"#1982C4", underPg:"#DBEEFF",
   sh:"0 1px 3px rgba(27,27,24,.06),0 1px 2px rgba(27,27,24,.04)",
   shL:"0 4px 12px rgba(27,27,24,.08),0 2px 4px rgba(27,27,24,.04)",
 };
@@ -67,15 +67,20 @@ const Ico = ({t,sz=20,c=C.ts}) => {
     minus:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>,
     clock:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
     target:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,
+    arrowUp:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>,
+    arrowDown:<svg style={s} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>,
   };
   return m[t]||null;
 };
 
-const PBar = ({val,max,color=C.pri}) => {
-  const pct=Math.min((val/max)*100,100);
-  return <div style={{width:"100%",height:8,borderRadius:99,background:C.pb,overflow:"hidden"}}>
-    <div style={{height:"100%",borderRadius:99,width:`${pct}%`,background:pct>=100?C.ok:color,transition:"width .4s cubic-bezier(.34,1.56,.64,1)"}}/>
-  </div>;
+// ─── Progress bar ───
+const PBar = ({val, max, color=C.pri}) => {
+  const pct = Math.min((val / max) * 100, 100);
+  return (
+    <div style={{width:"100%",height:8,borderRadius:99,background:C.pb,overflow:"hidden"}}>
+      <div style={{height:"100%",borderRadius:99,width:`${pct}%`,background:color,transition:"width .4s cubic-bezier(.34,1.56,.64,1)"}}/>
+    </div>
+  );
 };
 
 // ─── App ───
@@ -95,22 +100,66 @@ function App() {
   const updH=useCallback((id,u)=>setData(p=>({...p,habits:p.habits.map(h=>h.id===id?{...h,...u}:h)})),[]);
   const delH=useCallback(id=>setData(p=>({...p,habits:p.habits.filter(h=>h.id!==id),logs:Object.fromEntries(Object.entries(p.logs).filter(([k])=>!k.startsWith(id+":")))})),[]);
 
+  // ─── Streak — works for all 3 types ───
   const streak=useCallback(h=>{
     let s=0;
-    if(h.cycle==="daily"){const d=new Date();for(let i=0;i<365;i++){const v=gl(h.id,fmt(d));if(h.type==="time"?v>=h.goal:v>=h.goal)s++;else if(i>0)break;d.setDate(d.getDate()-1);}}
-    else{const w=new Date(weekStart(today())+"T00:00:00");for(let i=0;i<52;i++){const ds=weekDaysOf(fmt(w));const tot=ds.reduce((a,d)=>a+gl(h.id,d),0);if(h.type==="time"?tot>=h.goal*7:tot>=h.goal)s++;else if(i>0)break;w.setDate(w.getDate()-7);}}
+    const isUnder = h.type==="counter" && h.direction==="under";
+    const hitDay = (v, hasLog) => {
+      if(h.type==="time") return v>=h.goal;
+      if(h.type==="counter") return isUnder ? (hasLog && v<=h.goal) : v>=h.goal;
+      return v>=h.goal;
+    };
+    if(h.cycle==="daily"){
+      const d=new Date();
+      for(let i=0;i<365;i++){
+        const ds=fmt(d);
+        const hasLog = (`${h.id}:${ds}`) in data.logs;
+        const v=gl(h.id,ds);
+        if(hitDay(v,hasLog))s++;
+        else if(i>0)break;
+        d.setDate(d.getDate()-1);
+      }
+    } else {
+      const w=new Date(weekStart(today())+"T00:00:00");
+      for(let i=0;i<52;i++){
+        const ds=weekDaysOf(fmt(w));
+        const tot=ds.reduce((a,d)=>a+gl(h.id,d),0);
+        const hasLog=ds.some(d=>(`${h.id}:${d}`) in data.logs);
+        let hit;
+        if(h.type==="time") hit=tot>=h.goal*7;
+        else if(h.type==="counter") hit=isUnder ? (hasLog && tot<=h.goal) : tot>=h.goal;
+        else hit=tot>=h.goal;
+        if(hit)s++;
+        else if(i>0)break;
+        w.setDate(w.getDate()-7);
+      }
+    }
     return s;
-  },[gl]);
+  },[gl, data.logs]);
 
   const ft=m=>{if(m<60)return`${m}m`;const h=Math.floor(m/60),r=m%60;return r>0?`${h}h ${r}m`:`${h}h`;};
   const fi=m=>{if(m<60)return`${m}m`;if(m%60===0)return`${m/60}h`;return`${Math.floor(m/60)}h${m%60}m`;};
 
+  // ─── Progress calculation — handles counter type ───
   const prog=h=>{
     const tv=gl(h.id,ts),wt=wd.reduce((s,d)=>s+gl(h.id,d),0),isT=h.type==="time";
+    const isCnt=h.type==="counter";
     let p,gd,cur;
-    if(isT){if(h.cycle==="daily"){p=tv/h.goal;cur=ft(tv);gd=ft(h.goal);}else{p=wt/(h.goal*7);cur=ft(wt);gd=ft(h.goal*7)+"/wk";}}
-    else{if(h.cycle==="weekly"){p=wt/h.goal;cur=`${wt}`;gd=`${h.goal}×/wk`;}else{p=tv/h.goal;cur=`${tv}`;gd=`${h.goal}×/day`;}}
-    return{p,cur,gd,tv,wt,isT};
+    if(isCnt){
+      const dir=h.direction||"over";
+      const isWeekly=h.cycle==="weekly";
+      const val=isWeekly?wt:tv;
+      cur=`${val}`;
+      gd=`${dir==="under"?"<":">"} ${h.goal}/${isWeekly?"wk":"day"}`;
+      p = val/h.goal; // fills left→right; ≥1 means over the limit for "under"
+    } else if(isT){
+      if(h.cycle==="daily"){p=tv/h.goal;cur=ft(tv);gd=ft(h.goal);}
+      else{p=wt/(h.goal*7);cur=ft(wt);gd=ft(h.goal*7)+"/wk";}
+    } else {
+      if(h.cycle==="weekly"){p=wt/h.goal;cur=`${wt}`;gd=`${h.goal}×/wk`;}
+      else{p=tv/h.goal;cur=`${tv}`;gd=`${h.goal}×/day`;}
+    }
+    return{p,cur,gd,tv,wt,isT,isCnt};
   };
 
   const doAdd=useCallback((id,isT,inc)=>setData(p=>{const k=`${id}:${ts}`,c=p.logs[k]||0;return{...p,logs:{...p.logs,[k]:c+(isT?inc:1)}};}),[ts]);
@@ -126,26 +175,44 @@ function App() {
 
   // ─── Card renderer ───
   const card=h=>{
-    const{p:pr,cur,gd,isT}=prog(h);
-    const inc=h.increment||60,done=pr>=1,st=streak(h);
-    return <div key={h.id} style={{...crd,borderLeft:`4px solid ${done?C.ok:h.color||C.pri}`}}>
+    const{p:pr,cur,gd,isT,isCnt}=prog(h);
+    const inc=h.increment||60;
+    const dir=h.direction||"over";
+    const tv=gl(h.id,ts);
+    const isWeekly=isCnt&&h.cycle==="weekly";
+    const cntVal=isWeekly?wd.reduce((s,d)=>s+gl(h.id,d),0):tv;
+    const done = isCnt
+      ? (dir==="under" ? cntVal<=h.goal : cntVal>=h.goal)
+      : pr>=1;
+    const st=streak(h);
+    // For "under": green when at/under goal, red when over; bar fills left→right showing how close to limit
+    const underOver = isCnt && dir==="under" && cntVal>h.goal;
+    const barColor = isCnt
+      ? (dir==="under" ? (underOver ? C.acc : C.ok) : h.color||C.pri)
+      : (done ? C.ok : h.color||C.pri);
+
+    return <div key={h.id} style={{...crd,borderLeft:`4px solid ${done?C.ok:(underOver?C.acc:h.color||C.pri)}`}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
         <div style={{flex:1}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
             <span style={{fontSize:16,fontWeight:700}}>{h.name}</span>
             {done&&<span style={{fontSize:12,background:C.pg,color:C.ok,padding:"2px 8px",borderRadius:99,fontWeight:700}}>✓</span>}
+            {isCnt&&<span style={{fontSize:11,display:"inline-flex",alignItems:"center",gap:3,background:dir==="under"?C.underPg:C.pg,color:dir==="under"?C.under:C.ok,padding:"2px 8px",borderRadius:99,fontWeight:700}}>
+              <Ico t={dir==="under"?"arrowDown":"arrowUp"} sz={11} c={dir==="under"?C.under:C.ok}/>
+              {dir==="under"?"Stay Under":"Stay Over"}
+            </span>}
           </div>
           <div style={{fontSize:13,color:C.tm}}>
-            {isT?cur:`${cur}×`} / {gd}
+            {isCnt?`${cur} / ${gd}`:(isT?cur:`${cur}×`) + " / " + gd}
             {st>0&&<span style={{marginLeft:10,color:C.acc}}>🔥 {st} {h.cycle==="daily"?"day":"week"} streak</span>}
           </div>
         </div>
         <button style={{...bGh,padding:"6px 8px"}} onClick={()=>{setSelH(h);setView("stats");}}><Ico t="chart" sz={18} c={C.tm}/></button>
       </div>
-      <PBar val={Math.min(pr,1)} max={1} color={h.color||C.pri}/>
+      <PBar val={isCnt?cntVal:Math.min(pr,1)} max={isCnt?h.goal:1} color={barColor}/>
       <div style={{display:"flex",alignItems:"center",gap:8,marginTop:14}}>
         <button style={{...tBtn,background:C.bg,border:`1.5px solid ${C.cb}`}} onClick={()=>doSub(h.id,isT,inc)}><Ico t="minus" sz={18} c={C.ts}/></button>
-        <button style={{...tBtn,flex:1,borderRadius:14,background:done?C.pg:C.pri,color:done?C.pri:"#fff",fontSize:15,fontWeight:700,height:48}} onClick={()=>doAdd(h.id,isT,inc)}>
+        <button style={{...tBtn,flex:1,borderRadius:14,background:done?C.pg:(underOver?C.acc+"22":h.color||C.pri),color:done?C.ok:(underOver?C.acc:"#fff"),fontSize:15,fontWeight:700,height:48}} onClick={()=>doAdd(h.id,isT,inc)}>
           {isT?`+ ${fi(inc)}`:"+\u00a01"}
         </button>
       </div>
@@ -159,15 +226,19 @@ function App() {
     const [cy,setCy]=useState(ex?.cycle||"daily");
     const [gH,setGH]=useState(ex&&ex.type==="time"?String(Math.floor(ex.goal/60)):"1");
     const [gM,setGM]=useState(ex&&ex.type==="time"?String(ex.goal%60):"0");
-    const [gF,setGF]=useState(ex&&ex.type==="frequency"?String(ex.goal):"3");
+    const [gF,setGF]=useState(ex&&(ex.type==="frequency"||ex.type==="counter")?String(ex.goal):"3");
     const [im,setIm]=useState(ex?.increment?String(ex.increment):"60");
     const [cl,setCl]=useState(ex?.color||C.pri);
+    const [dir,setDir]=useState(ex?.direction||"over");
     const cols=["#2D6A4F","#264653","#E76F51","#E9C46A","#6A4C93","#1982C4","#F77F00","#8338EC"];
     const prs=[{l:"5m",v:"5"},{l:"15m",v:"15"},{l:"30m",v:"30"},{l:"1h",v:"60"}];
     const sv=()=>{
       if(!nm.trim())return;
       const g=tp==="time"?(parseInt(gH||0)*60+parseInt(gM||0)):parseInt(gF||1);
-      const h={name:nm.trim(),type:tp,cycle:cy,goal:Math.max(1,g),increment:tp==="time"?Math.max(1,parseInt(im||60)):undefined,color:cl};
+      const h={name:nm.trim(),type:tp,cycle:cy,goal:Math.max(1,g),
+        increment:tp==="time"?Math.max(1,parseInt(im||60)):undefined,
+        direction:tp==="counter"?dir:undefined,
+        color:cl};
       if(ex)updH(ex.id,h);else addH(h);
       setView("home");setEdH(null);
     };
@@ -178,20 +249,47 @@ function App() {
       <div style={{padding:"0 20px"}}>
         <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400,marginBottom:24}}>{ex?"Edit Habit":"New Habit"}</div>
         <div style={{marginBottom:20}}><label style={lbl}>Habit Name</label><input style={ipt} placeholder="e.g. Study, Work Out, Read..." value={nm} onChange={e=>setNm(e.target.value)}/></div>
+
+        {/* ── Type selector ── */}
         <div style={{marginBottom:20}}><label style={lbl}>Type</label>
-          <div style={{display:"flex",gap:8}}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <button style={chip(tp==="time")} onClick={()=>setTp("time")}><span style={{display:"inline-flex",alignItems:"center",gap:4}}><Ico t="clock" sz={14} c={tp==="time"?C.pri:C.tm}/> Time-based</span></button>
             <button style={chip(tp==="frequency")} onClick={()=>setTp("frequency")}><span style={{display:"inline-flex",alignItems:"center",gap:4}}><Ico t="target" sz={14} c={tp==="frequency"?C.pri:C.tm}/> Frequency</span></button>
+            <button style={chip(tp==="counter")} onClick={()=>setTp("counter")}><span style={{display:"inline-flex",alignItems:"center",gap:4}}><Ico t="arrowUp" sz={14} c={tp==="counter"?C.pri:C.tm}/> Counter Goal</span></button>
           </div>
         </div>
+
+        {/* ── Counter-specific direction selector ── */}
+        {tp==="counter"&&<div style={{marginBottom:20}}>
+          <label style={lbl}>Direction</label>
+          <div style={{display:"flex",gap:8}}>
+            <button style={{...chip(dir==="over"),display:"inline-flex",alignItems:"center",gap:6}} onClick={()=>setDir("over")}>
+              <Ico t="arrowUp" sz={14} c={dir==="over"?C.pri:C.tm}/> Stay Over / At Least
+            </button>
+            <button style={{...chip(dir==="under"),display:"inline-flex",alignItems:"center",gap:6}} onClick={()=>setDir("under")}>
+              <Ico t="arrowDown" sz={14} c={dir==="under"?C.under:C.tm}/> Stay Under / At Most
+            </button>
+          </div>
+          <div style={{marginTop:8,fontSize:12,color:C.tm,lineHeight:1.5}}>
+            {dir==="over"
+              ? "✅ Goal is met when your count reaches or exceeds the target."
+              : "✅ Goal is met when your count stays at or below the target."}
+          </div>
+        </div>}
+
         <div style={{marginBottom:20}}><label style={lbl}>Cycle</label>
           <div style={{display:"flex",gap:8}}>
             <button style={chip(cy==="daily")} onClick={()=>setCy("daily")}>Daily</button>
             <button style={chip(cy==="weekly")} onClick={()=>setCy("weekly")}>Weekly</button>
           </div>
         </div>
+
         <div style={{marginBottom:20}}>
-          <label style={lbl}>{tp==="time"?`Goal (per ${cy==="daily"?"day":"day, summed weekly"})`:`Times per ${cy==="daily"?"day":"week"}`}</label>
+          <label style={lbl}>
+            {tp==="time"?`Goal (per ${cy==="daily"?"day":"day, summed weekly"})`
+              :tp==="counter"?`Target number per ${cy==="weekly"?"week":"day"}`
+              :`Times per ${cy==="daily"?"day":"week"}`}
+          </label>
           {tp==="time"?<div style={{display:"flex",gap:8,alignItems:"center"}}>
             <input style={{...ipt,width:70,textAlign:"center"}} type="number" min="0" value={gH} onChange={e=>setGH(e.target.value)}/>
             <span style={{fontSize:14,color:C.ts,fontWeight:500}}>hours</span>
@@ -199,6 +297,7 @@ function App() {
             <span style={{fontSize:14,color:C.ts,fontWeight:500}}>min</span>
           </div>:<input style={{...ipt,width:80,textAlign:"center"}} type="number" min="1" value={gF} onChange={e=>setGF(e.target.value)}/>}
         </div>
+
         {tp==="time"&&<div style={{marginBottom:20}}>
           <label style={lbl}>Tap Increment</label>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{prs.map(p=><button key={p.v} style={chip(im===p.v)} onClick={()=>setIm(p.v)}>{p.l}</button>)}</div>
@@ -208,6 +307,7 @@ function App() {
             <span style={{fontSize:13,color:C.tm}}>minutes</span>
           </div>
         </div>}
+
         <div style={{marginBottom:28}}><label style={lbl}>Color</label>
           <div style={{display:"flex",gap:8}}>{cols.map(c=><button key={c} onClick={()=>setCl(c)} style={{width:32,height:32,borderRadius:10,background:c,border:cl===c?"3px solid "+C.txt:"3px solid transparent",cursor:"pointer"}}/>)}</div>
         </div>
@@ -219,12 +319,43 @@ function App() {
 
   // ─── Stats ───
   const Stats=({habit:h})=>{
-    const isT=h.type==="time",st=streak(h);
-    const wbd=wd.map(d=>{const v=gl(h.id,d);return{day:dayLbl(d),value:v,goal:isT?h.goal:(h.cycle==="daily"?h.goal:undefined),hit:isT?v>=h.goal:v>=(h.cycle==="daily"?h.goal:1)};});
-    const wks=weeksBack(8);
-    const td=wks.map(ws=>{const ds=weekDaysOf(ws);const tot=ds.reduce((s,d)=>s+gl(h.id,d),0);const dt=new Date(ws+"T00:00:00");return{week:`${dt.getDate()}/${dt.getMonth()+1}`,total:isT?Math.round(tot/60*10)/10:tot,weekGoal:isT?Math.round(h.goal*7/60*10)/10:(h.cycle==="weekly"?h.goal:h.goal*7)};});
+    const isT=h.type==="time",isCnt=h.type==="counter",st=streak(h);
+    const dir=h.direction||"over";
+    const isWeeklyCnt=isCnt&&h.cycle==="weekly";
+    const barColor = isCnt ? (dir==="under" ? C.under : h.color||C.pri) : h.color||C.pri;
     const tv=gl(h.id,ts),wt=wd.reduce((s,d)=>s+gl(h.id,d),0);
+    // For weekly counter, "hit" is assessed on the whole week total
+    const weekHit = isCnt ? (dir==="under" ? wt>0 && wt<=h.goal : wt>=h.goal) : false;
+    const wbd=wd.map(d=>{
+      const v=gl(h.id,d);
+      const hit=isT?v>=h.goal
+        :isCnt?(isWeeklyCnt?weekHit:(dir==="under"?v<=h.goal:v>=h.goal))
+        :v>=(h.cycle==="daily"?h.goal:1);
+      return{day:dayLbl(d),value:v,goal:isWeeklyCnt?Math.round(h.goal/7*10)/10:h.goal,hit};
+    });
+    const wks=weeksBack(8);
+    const td=wks.map(ws=>{
+      const ds=weekDaysOf(ws);const tot=ds.reduce((s,d)=>s+gl(h.id,d),0);
+      const dt=new Date(ws+"T00:00:00");
+      const weekGoal=isT?Math.round(h.goal*7/60*10)/10
+        :isCnt?h.goal
+        :(h.cycle==="weekly"?h.goal:h.goal*7);
+      return{week:`${dt.getDate()}/${dt.getMonth()+1}`,total:isT?Math.round(tot/60*10)/10:tot,weekGoal};
+    });
     const ttStyle={borderRadius:10,border:`1px solid ${C.cb}`,boxShadow:C.sh,fontFamily:"'DM Sans',sans-serif",fontSize:13};
+
+    const goalDesc = isT
+      ? `${ft(h.goal)} per ${h.cycle==="daily"?"day":"week"}`
+      : isCnt
+        ? `${dir==="under"?"At most":"At least"} ${h.goal} per ${h.cycle==="weekly"?"week":"day"}`
+        : `${h.goal}× per ${h.cycle==="daily"?"day":"week"}`;
+
+    // "Today" stat tile: for weekly counter show week total instead of today
+    const todayVal = isCnt
+      ? (isWeeklyCnt ? `${wt}` : `${tv}`)
+      : isT ? ft(tv) : `${tv}×`;
+    const todayLbl = isWeeklyCnt ? "This Week" : "Today";
+
     return <>
       <div style={{padding:"24px 20px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <button style={{...bGh,padding:"8px 0"}} onClick={()=>{setView("home");setSelH(null);}}><Ico t="back" sz={20} c={C.txt}/><span style={{marginLeft:4,color:C.txt,fontWeight:600}}>Back</span></button>
@@ -232,21 +363,29 @@ function App() {
       </div>
       <div style={{padding:"0 20px"}}>
         <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
-          <div style={{width:6,height:36,borderRadius:99,background:h.color||C.pri}}/>
+          <div style={{width:6,height:36,borderRadius:99,background:barColor}}/>
           <div>
-            <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400}}>{h.name}</div>
-            <div style={{fontSize:13,color:C.tm}}>{isT?`${ft(h.goal)} per ${h.cycle==="daily"?"day":"week"}`:`${h.goal}× per ${h.cycle==="daily"?"day":"week"}`}</div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div style={{fontFamily:"'DM Serif Display',serif",fontSize:28,fontWeight:400}}>{h.name}</div>
+              {isCnt&&<span style={{fontSize:11,display:"inline-flex",alignItems:"center",gap:3,background:dir==="under"?C.underPg:C.pg,color:dir==="under"?C.under:C.ok,padding:"3px 10px",borderRadius:99,fontWeight:700}}>
+                <Ico t={dir==="under"?"arrowDown":"arrowUp"} sz={11} c={dir==="under"?C.under:C.ok}/>
+                {dir==="under"?"Stay Under":"Stay Over"}
+              </span>}
+            </div>
+            <div style={{fontSize:13,color:C.tm}}>{goalDesc}</div>
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:24}}>
-          {[{l:"Today",v:isT?ft(tv):`${tv}×`,i:"clock"},{l:"This Week",v:isT?ft(wt):`${wt}×`,i:"chart"},{l:"Streak",v:`${st} ${h.cycle==="daily"?"d":"w"}`,i:"fire"}].map((x,i)=>
+          {[{l:todayLbl,v:todayVal,i:"clock"},{l:"This Week",v:isCnt?`${wt}`:isT?ft(wt):`${wt}×`,i:"chart"},{l:"Streak",v:`${st} ${h.cycle==="daily"?"d":"w"}`,i:"fire"}].map((x,i)=>
             <div key={i} style={{background:C.card,borderRadius:14,padding:"14px 12px",textAlign:"center",boxShadow:C.sh,border:`1px solid ${C.cb}`}}>
-              <div style={{marginBottom:6}}><Ico t={x.i} sz={18} c={h.color||C.pri}/></div>
+              <div style={{marginBottom:6}}><Ico t={x.i} sz={18} c={barColor}/></div>
               <div style={{fontSize:20,fontWeight:700,fontFamily:"'DM Serif Display',serif"}}>{x.v}</div>
               <div style={{fontSize:11,color:C.tm,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em",marginTop:2}}>{x.l}</div>
             </div>
           )}
         </div>
+
+        {/* Weekly bar chart */}
         <div style={{...crd,margin:"0 0 16px"}}>
           <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>This Week</div>
           <ResponsiveContainer width="100%" height={180}>
@@ -254,22 +393,28 @@ function App() {
               <CartesianGrid strokeDasharray="3 3" stroke={C.cb} vertical={false}/>
               <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fill:C.tm,fontSize:12,fontWeight:500}}/>
               <YAxis hide/>
-              <Tooltip contentStyle={ttStyle} formatter={(v,n)=>n==="goal"?(isT?ft(v):`${v}× goal`):(isT?ft(v):`${v}×`)}/>
-              {(isT||h.cycle==="daily")&&<Bar dataKey="goal" radius={[6,6,6,6]} fill={C.pb}/>}
-              <Bar dataKey="value" radius={[6,6,6,6]}>{wbd.map((e,i)=><Cell key={i} fill={e.hit?(h.color||C.pri):C.tm+"40"}/>)}</Bar>
+              <Tooltip contentStyle={ttStyle} formatter={(v,n)=>n==="goal"?(isCnt?`${v} target`:(isT?ft(v):`${v}× goal`)):(isCnt?`${v}`:(isT?ft(v):`${v}×`))}/>
+              {/* Reference line for counter goal */}
+              {isCnt&&<ReferenceLine y={h.goal} stroke={barColor} strokeDasharray="6 3" strokeWidth={1.5}/>}
+              {(!isCnt)&&(isT||h.cycle==="daily")&&<Bar dataKey="goal" radius={[6,6,6,6]} fill={C.pb}/>}
+              <Bar dataKey="value" radius={[6,6,6,6]}>
+                {wbd.map((e,i)=><Cell key={i} fill={e.hit?barColor:C.tm+"40"}/>)}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
+
+        {/* 8 week trend */}
         <div style={{...crd,margin:"0 0 16px"}}>
-          <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>{isT?"Weekly Hours":"Weekly Completions"} — 8 Week Trend</div>
+          <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>{isT?"Weekly Hours":isCnt?(isWeeklyCnt?"Weekly Totals — 8 Weeks":"Daily Counts — 8 Weeks"):"Weekly Completions"} — 8 Week Trend</div>
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={td}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.cb} vertical={false}/>
               <XAxis dataKey="week" axisLine={false} tickLine={false} tick={{fill:C.tm,fontSize:11,fontWeight:500}}/>
               <YAxis hide/>
-              <Tooltip contentStyle={ttStyle} formatter={(v,n)=>n==="total"?(isT?`${v}h`:`${v}×`):(isT?`${v}h goal`:`${v}× goal`)}/>
+              <Tooltip contentStyle={ttStyle} formatter={(v,n)=>n==="total"?(isT?`${v}h`:`${v}`):(isT?`${v}h goal`:`${v} target`)}/>
               <Line type="monotone" dataKey="weekGoal" stroke={C.tm} strokeDasharray="6 3" strokeWidth={1.5} dot={false}/>
-              <Line type="monotone" dataKey="total" stroke={h.color||C.pri} strokeWidth={2.5} dot={{r:4,fill:h.color||C.pri,strokeWidth:0}} activeDot={{r:6}}/>
+              <Line type="monotone" dataKey="total" stroke={barColor} strokeWidth={2.5} dot={{r:4,fill:barColor,strokeWidth:0}} activeDot={{r:6}}/>
             </LineChart>
           </ResponsiveContainer>
         </div>
